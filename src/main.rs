@@ -613,7 +613,7 @@ fn main() {
                                     right.stderr(Stdio::from(file));
                                 }
 
-                                let right_child = match right.spawn() {
+                                let mut right_child = match right.spawn() {
                                     Ok(c) => c,
                                     Err(_) => {
                                         eprintln!("{}: command not found", right_cmd);
