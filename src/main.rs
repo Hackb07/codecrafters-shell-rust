@@ -5,11 +5,11 @@ use std::process::Command;
 
 fn main() {
     loop {
-        // Display shell prompt
+        // Shell prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read user input
+        // Read input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -20,7 +20,7 @@ fn main() {
             continue;
         }
 
-        // Split input into command + arguments
+        // Split command and arguments
         let parts: Vec<&str> = input.split_whitespace().collect();
 
         let command = parts[0];
@@ -63,40 +63,42 @@ fn main() {
                 }
             }
 
-            // External programs
-            _ => match find_executable(command) {
-                Some(path) => {
-                    let result = Command::new(path).args(args).spawn();
+            // External commands
+            _ => {
+                match find_executable(command) {
+                    Some(path) => {
+                        // Get parent directory
+                        let parent = path.parent().unwrap();
 
-                    match result {
-                        Ok(mut child) => {
-                            child.wait().unwrap();
-                        }
+                        let result = Command::new(command).args(args).current_dir(parent).spawn();
 
-                        Err(_) => {
-                            println!("{}: command not found", command);
+                        match result {
+                            Ok(mut child) => {
+                                child.wait().unwrap();
+                            }
+
+                            Err(_) => {
+                                println!("{}: command not found", command);
+                            }
                         }
                     }
-                }
 
-                None => {
-                    println!("{}: command not found", command);
+                    None => {
+                        println!("{}: command not found", command);
+                    }
                 }
-            },
+            }
         }
     }
 }
 
 // Search executable in PATH
 fn find_executable(command: &str) -> Option<PathBuf> {
-    // Read PATH variable
     let path_env = env::var("PATH").unwrap_or_default();
 
-    // Iterate through PATH directories
     for dir in env::split_paths(&path_env) {
         let full_path = dir.join(command);
 
-        // Check if executable exists
         if full_path.is_file() {
             return Some(full_path);
         }
