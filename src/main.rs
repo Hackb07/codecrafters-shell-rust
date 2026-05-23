@@ -16,7 +16,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read input
+        // Read user input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -55,6 +55,26 @@ fn main() {
                 }
             },
 
+            // Builtin: cd
+            "cd" => {
+                if args.is_empty() {
+                    continue;
+                }
+
+                let target_dir = args[0];
+
+                let path = Path::new(target_dir);
+
+                // Change directory
+                match env::set_current_dir(path) {
+                    Ok(_) => {}
+
+                    Err(_) => {
+                        println!("cd: {}: No such file or directory", target_dir);
+                    }
+                }
+            }
+
             // Builtin: type
             "type" => {
                 if args.is_empty() {
@@ -65,7 +85,7 @@ fn main() {
                 let cmd = args[0];
 
                 match cmd {
-                    "echo" | "exit" | "type" | "pwd" => {
+                    "echo" | "exit" | "type" | "pwd" | "cd" => {
                         println!("{} is a shell builtin", cmd);
                     }
 
