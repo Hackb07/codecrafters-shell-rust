@@ -40,6 +40,53 @@ struct Job {
 }
 
 // ======================
+// REAP
+// ======================
+
+fn reap_jobs(jobs: &mut Vec<Job>) {
+    let mut running: Vec<bool> = Vec::with_capacity(jobs.len());
+    for job in jobs.iter_mut() {
+        running.push(job.child.try_wait().ok() == Some(None));
+    }
+
+    let max1 = jobs.iter().map(|j| j.id).max().unwrap_or(0);
+    let max2 = jobs
+        .iter()
+        .filter(|j| j.id != max1)
+        .map(|j| j.id)
+        .max()
+        .unwrap_or(0);
+
+    for (i, &is_running) in running.iter().enumerate() {
+        if is_running {
+            continue;
+        }
+        let marker = if jobs[i].id == max1 {
+            '+'
+        } else if jobs[i].id == max2 {
+            '-'
+        } else {
+            ' '
+        };
+        let cmd = jobs[i]
+            .command
+            .trim_end()
+            .trim_end_matches('&')
+            .trim_end()
+            .to_string();
+        println!("[{}]{}  {:<24}{}", jobs[i].id, marker, "Done", cmd);
+    }
+
+    let mut i = jobs.len();
+    while i > 0 {
+        i -= 1;
+        if !running[i] {
+            jobs.remove(i);
+        }
+    }
+}
+
+// ======================
 // COMPLETER
 // ======================
 
@@ -403,6 +450,8 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
 
     loop {
+        reap_jobs(&mut jobs);
+
         let readline = rl.readline("$ ");
 
         match readline {
@@ -515,10 +564,7 @@ fn main() {
                     // JOBS
                     // ======================
                     "jobs" => {
-                        let mut running: Vec<bool> = Vec::with_capacity(jobs.len());
-                        for job in jobs.iter_mut() {
-                            running.push(job.child.try_wait().ok() == Some(None));
-                        }
+                        reap_jobs(&mut jobs);
 
                         let max1 = jobs.iter().map(|j| j.id).max().unwrap_or(0);
                         let max2 = jobs
@@ -528,40 +574,18 @@ fn main() {
                             .max()
                             .unwrap_or(0);
 
-                        for (i, &is_running) in running.iter().enumerate() {
-                            let marker = if jobs[i].id == max1 {
+                        for job in jobs.iter() {
+                            let marker = if job.id == max1 {
                                 '+'
-                            } else if jobs[i].id == max2 {
+                            } else if job.id == max2 {
                                 '-'
                             } else {
                                 ' '
                             };
-
-                            if is_running {
-                                println!(
-                                    "[{}]{}  {:<24}{}",
-                                    jobs[i].id, marker, "Running", jobs[i].command
-                                );
-                            } else {
-                                let cmd = jobs[i]
-                                    .command
-                                    .trim_end()
-                                    .trim_end_matches('&')
-                                    .trim_end()
-                                    .to_string();
-                                println!(
-                                    "[{}]{}  {:<24}{}",
-                                    jobs[i].id, marker, "Done", cmd
-                                );
-                            }
-                        }
-
-                        let mut i = jobs.len();
-                        while i > 0 {
-                            i -= 1;
-                            if !running[i] {
-                                jobs.remove(i);
-                            }
+                            println!(
+                                "[{}]{}  {:<24}{}",
+                                job.id, marker, "Running", job.command
+                            );
                         }
                     }
 
