@@ -505,8 +505,16 @@ fn main() {
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        if let Some((file_path, append)) = stdout_redirect {
-                            let mut file = open_file(&file_path, append);
+                        // IMPORTANT:
+                        // create stderr redirect file even if echo
+                        // doesn't write stderr
+
+                        if let Some((stderr_path, append)) = &stderr_redirect {
+                            let _ = open_file(stderr_path, *append);
+                        }
+
+                        if let Some((stdout_path, append)) = stdout_redirect {
+                            let mut file = open_file(&stdout_path, append);
 
                             file.write_all(output.as_bytes()).unwrap();
                         } else {
