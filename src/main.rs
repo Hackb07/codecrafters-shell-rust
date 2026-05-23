@@ -674,7 +674,7 @@ fn main() {
                                             jobs.push(Job {
                                                 id: job_id,
                                                 pid,
-                                                command: format!("{} &", input),
+                                                command: input.to_string(),
                                                 child,
                                             });
                                         }
