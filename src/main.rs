@@ -10,7 +10,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read input
+        // Read user input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -65,30 +65,41 @@ fn main() {
             }
 
             // External commands
-            _ => match find_executable(command) {
-                Some(path) => {
-                    let result = Command::new(&path).args(args).spawn();
+            _ => {
+                match find_executable(command) {
+                    Some(path) => {
+                        // Get executable directory
+                        let parent_dir = path.parent().unwrap();
 
-                    match result {
-                        Ok(mut child) => {
-                            child.wait().unwrap();
-                        }
+                        // Get executable filename only
+                        let executable_name = path.file_name().unwrap().to_str().unwrap();
 
-                        Err(_) => {
-                            println!("{}: command not found", command);
+                        let result = Command::new(format!("./{}", executable_name))
+                            .args(args)
+                            .current_dir(parent_dir)
+                            .spawn();
+
+                        match result {
+                            Ok(mut child) => {
+                                child.wait().unwrap();
+                            }
+
+                            Err(_) => {
+                                println!("{}: command not found", command);
+                            }
                         }
                     }
-                }
 
-                None => {
-                    println!("{}: command not found", command);
+                    None => {
+                        println!("{}: command not found", command);
+                    }
                 }
-            },
+            }
         }
     }
 }
 
-// Find executable in PATH
+// Search executable in PATH
 fn find_executable(command: &str) -> Option<PathBuf> {
     let path_env = env::var("PATH").unwrap_or_default();
 
@@ -103,17 +114,15 @@ fn find_executable(command: &str) -> Option<PathBuf> {
     None
 }
 
-// Check execute permissions
+// Check execute permission
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
         if let Ok(metadata) = fs::metadata(path) {
-            let permissions = metadata.permissions();
-            let mode = permissions.mode();
+            let mode = metadata.permissions().mode();
 
-            // Any execute bit set
             return mode & 0o111 != 0;
         }
     }
