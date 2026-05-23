@@ -16,7 +16,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read user input
+        // Read input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -61,16 +61,21 @@ fn main() {
                     continue;
                 }
 
-                let target_dir = args[0];
+                let target_dir = if args[0] == "~" {
+                    // HOME directory
+                    env::var("HOME").unwrap_or_default()
+                } else {
+                    args[0].to_string()
+                };
 
-                let path = Path::new(target_dir);
+                let path = Path::new(&target_dir);
 
                 // Change directory
                 match env::set_current_dir(path) {
                     Ok(_) => {}
 
                     Err(_) => {
-                        println!("cd: {}: No such file or directory", target_dir);
+                        println!("cd: {}: No such file or directory", args[0]);
                     }
                 }
             }
@@ -158,7 +163,7 @@ fn find_executable(command: &str) -> Option<PathBuf> {
     None
 }
 
-// Check executable permissions
+// Check execute permissions
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
