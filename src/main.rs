@@ -250,7 +250,15 @@ fn main() {
                     // ======================
                     "type" => {
                         if args.is_empty() {
-                            eprintln!("type: missing argument");
+                            let error_output = "type: missing argument\n";
+
+                            if let Some((file_path, append)) = stderr_redirect {
+                                let mut file = open_file(&file_path, append);
+
+                                file.write_all(error_output.as_bytes()).unwrap();
+                            } else {
+                                eprint!("{}", error_output);
+                            }
 
                             continue;
                         }
@@ -264,11 +272,11 @@ fn main() {
 
                             _ => match find_executable(cmd) {
                                 Some(path) => {
-                                    format!("{} is {}", cmd, path.display())
+                                    format!("{} is {}\n", cmd, path.display())
                                 }
 
                                 None => {
-                                    format!("{}: not found", cmd)
+                                    format!("{}: not found\n", cmd)
                                 }
                             },
                         };
@@ -278,6 +286,7 @@ fn main() {
                             let _ = open_file(file_path, *append);
                         }
 
+                        // stdout redirect
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
