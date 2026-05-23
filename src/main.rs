@@ -105,10 +105,7 @@ impl Completer for ShellCompleter {
 
                         candidates.sort();
 
-                        // ======================
                         // SINGLE MATCH
-                        // ======================
-
                         if candidates.len() == 1 {
                             let candidate = &candidates[0];
 
@@ -124,10 +121,7 @@ impl Completer for ShellCompleter {
                             ));
                         }
 
-                        // ======================
-                        // LONGEST COMMON PREFIX
-                        // ======================
-
+                        // LCP
                         if !candidates.is_empty() {
                             let lcp = longest_common_prefix(&candidates);
 
@@ -145,10 +139,7 @@ impl Completer for ShellCompleter {
                             }
                         }
 
-                        // ======================
                         // MULTIPLE MATCHES
-                        // ======================
-
                         if candidates.len() > 1 {
                             let mut last_input = self.last_input.borrow_mut();
 
@@ -190,17 +181,14 @@ impl Completer for ShellCompleter {
         }
 
         // ======================
-        // NORMAL FILE/COMMAND COMPLETION
+        // NORMAL COMPLETION
         // ======================
 
         let mut matches: Vec<(String, bool)> = Vec::new();
 
         let is_command_position = !input.contains(' ');
 
-        // ======================
-        // BUILTIN + EXECUTABLES
-        // ======================
-
+        // BUILTINS + EXECUTABLES
         if is_command_position {
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
@@ -241,9 +229,7 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // ======================
         // FILE / DIR COMPLETION
-        // ======================
 
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
             (&current_arg[..idx + 1], &current_arg[idx + 1..])
@@ -282,10 +268,7 @@ impl Completer for ShellCompleter {
 
         matches.dedup_by(|a, b| a.0 == b.0);
 
-        // ======================
         // NO MATCH
-        // ======================
-
         if matches.is_empty() {
             print!("\x07");
 
@@ -294,10 +277,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // ======================
         // SINGLE MATCH
-        // ======================
-
         if matches.len() == 1 {
             let (completion, is_dir) = matches[0].clone();
 
@@ -317,10 +297,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // ======================
-        // LONGEST COMMON PREFIX
-        // ======================
-
+        // LCP
         let names: Vec<String> = matches.iter().map(|m| m.0.clone()).collect();
 
         let lcp = longest_common_prefix(&names);
@@ -337,10 +314,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // ======================
         // MULTIPLE MATCHES
-        // ======================
-
         let mut last_input = self.last_input.borrow_mut();
 
         let mut tab_count = self.tab_count.borrow_mut();
@@ -422,7 +396,71 @@ fn main() {
                     continue;
                 }
 
-                let parts = parse_input(input);
+                let mut parts = parse_input(input);
+
+                if parts.is_empty() {
+                    continue;
+                }
+
+                let mut stdout_redirect: Option<(String, bool)> = None;
+
+                let mut stderr_redirect: Option<(String, bool)> = None;
+
+                let mut cleaned_parts = Vec::new();
+
+                let mut i = 0;
+
+                while i < parts.len() {
+                    match parts[i].as_str() {
+                        ">" | "1>" => {
+                            if i + 1 < parts.len() {
+                                stdout_redirect = Some((parts[i + 1].clone(), false));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        ">>" | "1>>" => {
+                            if i + 1 < parts.len() {
+                                stdout_redirect = Some((parts[i + 1].clone(), true));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        "2>" => {
+                            if i + 1 < parts.len() {
+                                stderr_redirect = Some((parts[i + 1].clone(), false));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        "2>>" => {
+                            if i + 1 < parts.len() {
+                                stderr_redirect = Some((parts[i + 1].clone(), true));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        _ => {
+                            cleaned_parts.push(parts[i].clone());
+
+                            i += 1;
+                        }
+                    }
+                }
+
+                parts = cleaned_parts;
 
                 if parts.is_empty() {
                     continue;
@@ -437,7 +475,19 @@ fn main() {
                     }
 
                     "echo" => {
-                        println!("{}", args.join(" "));
+                        let output = format!("{}\n", args.join(" "));
+
+                        if let Some((file_path, append)) = &stderr_redirect {
+                            let _ = open_file(file_path, *append);
+                        }
+
+                        if let Some((file_path, append)) = stdout_redirect {
+                            let mut file = open_file(&file_path, append);
+
+                            file.write_all(output.as_bytes()).unwrap();
+                        } else {
+                            print!("{}", output);
+                        }
                     }
 
                     "pwd" => {
@@ -524,6 +574,18 @@ fn main() {
 
                             cmd.args(args);
 
+                            if let Some((file_path, append)) = stdout_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stdout(Stdio::from(file));
+                            }
+
+                            if let Some((file_path, append)) = stderr_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stderr(Stdio::from(file));
+                            }
+
                             match cmd.spawn() {
                                 Ok(mut child) => {
                                     child.wait().unwrap();
@@ -577,7 +639,32 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
+        // DOUBLE QUOTE ESCAPES
+        if ch == '\\' && in_double_quotes {
+            if i + 1 < chars.len() {
+                let next = chars[i + 1];
+
+                match next {
+                    '"' | '\\' => {
+                        current.push(next);
+
+                        i += 2;
+                        continue;
+                    }
+
+                    _ => {
+                        current.push('\\');
+                        current.push(next);
+
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+
         match ch {
+            // ESCAPE
             '\\' if !in_single_quotes && !in_double_quotes => {
                 i += 1;
 
@@ -586,20 +673,70 @@ fn parse_input(input: &str) -> Vec<String> {
                 }
             }
 
+            // SINGLE QUOTES
             '\'' if !in_double_quotes => {
                 in_single_quotes = !in_single_quotes;
             }
 
+            // DOUBLE QUOTES
             '"' if !in_single_quotes => {
                 in_double_quotes = !in_double_quotes;
             }
 
+            // SPACES
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
 
                     current.clear();
                 }
+            }
+
+            // 1> 1>> 2> 2>>
+            '1' | '2'
+                if !in_single_quotes
+                    && !in_double_quotes
+                    && i + 1 < chars.len()
+                    && chars[i + 1] == '>' =>
+            {
+                if !current.is_empty() {
+                    args.push(current.clone());
+
+                    current.clear();
+                }
+
+                let mut token = String::new();
+
+                token.push(ch);
+                token.push('>');
+
+                i += 2;
+
+                if i < chars.len() && chars[i] == '>' {
+                    token.push('>');
+                } else {
+                    i -= 1;
+                }
+
+                args.push(token);
+            }
+
+            // > >>
+            '>' if !in_single_quotes && !in_double_quotes => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+
+                    current.clear();
+                }
+
+                let mut token = String::from(">");
+
+                if i + 1 < chars.len() && chars[i + 1] == '>' {
+                    token.push('>');
+                    i += 1;
+                }
+
+                args.push(token);
             }
 
             _ => {
@@ -618,7 +755,7 @@ fn parse_input(input: &str) -> Vec<String> {
 }
 
 // ======================
-// LONGEST COMMON PREFIX
+// LCP
 // ======================
 
 fn longest_common_prefix(strings: &[String]) -> String {
@@ -642,7 +779,21 @@ fn longest_common_prefix(strings: &[String]) -> String {
 }
 
 // ======================
-// EXECUTABLE SEARCH
+// FILE OPEN
+// ======================
+
+fn open_file(path: &str, append: bool) -> File {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(path)
+        .unwrap()
+}
+
+// ======================
+// FIND EXECUTABLE
 // ======================
 
 fn find_executable(command: &str) -> Option<PathBuf> {
