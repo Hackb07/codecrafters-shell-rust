@@ -1,3 +1,5 @@
+// src/main.rs
+
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -5,10 +7,11 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 
-#[derive(Helper, Completer, Hinter, Validator, Highlighter)]
-struct ShellHelper;
+#[derive(Helper, Hinter, Validator, Highlighter)]
+struct ShellCompleter;
 
-impl rustyline::completion::Completer for ShellHelper {
+// Custom TAB completion
+impl Completer for ShellCompleter {
     type Candidate = Pair;
 
     fn complete(
@@ -17,43 +20,52 @@ impl rustyline::completion::Completer for ShellHelper {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        // Builtin commands
         let builtins = ["echo", "exit"];
 
+        // Current typed text
         let input = &line[..pos];
 
         let mut matches = Vec::new();
 
-        for cmd in builtins {
-            if cmd.starts_with(input) {
+        for builtin in builtins {
+            // Match partial input
+            if builtin.starts_with(input) {
                 matches.push(Pair {
-                    display: cmd.to_string(),
-                    replacement: format!("{} ", cmd),
+                    display: builtin.to_string(),
+
+                    // Add trailing space
+                    replacement: format!("{} ", builtin),
                 });
             }
         }
 
+        // Replace from beginning of line
         Ok((0, matches))
     }
 }
 
-fn main() -> rustyline::Result<()> {
-    let helper = ShellHelper;
+fn main() {
+    // Create rustyline editor
+    let mut rl = Editor::<ShellCompleter>::new().unwrap();
 
-    let mut rl = Editor::new()?;
-
-    rl.set_helper(Some(helper));
+    // Attach completer
+    rl.set_helper(Some(ShellCompleter));
 
     loop {
-        let line = rl.readline("$ ");
+        // Read line with prompt
+        let readline = rl.readline("$ ");
 
-        match line {
-            Ok(input) => {
-                let input = input.trim();
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
 
+                // exit builtin
                 if input == "exit" {
                     break;
                 }
 
+                // echo builtin
                 if input.starts_with("echo ") {
                     println!("{}", &input[5..]);
                 }
@@ -68,11 +80,9 @@ fn main() -> rustyline::Result<()> {
             }
 
             Err(err) => {
-                println!("Error: {:?}", err);
+                eprintln!("Error: {:?}", err);
                 break;
             }
         }
     }
-
-    Ok(())
 }
