@@ -1,7 +1,7 @@
 use std::env;
-use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     loop {
@@ -15,7 +15,7 @@ fn main() {
 
         let input = input.trim();
 
-        // Ignore empty input
+        // Ignore empty lines
         if input.is_empty() {
             continue;
         }
@@ -23,95 +23,76 @@ fn main() {
         // Split command
         let parts: Vec<&str> = input.split_whitespace().collect();
 
-        match parts[0] {
-            // Exit command
+        let command = parts[0];
+        let args = &parts[1..];
+
+        match command {
+            // Builtin: exit
             "exit" => {
                 break;
             }
 
-            // Echo command
+            // Builtin: echo
             "echo" => {
-                let args = parts[1..].join(" ");
-                println!("{}", args);
+                println!("{}", args.join(" "));
             }
 
-            // Type command
+            // Builtin: type
             "type" => {
-                // Check argument
-                if parts.len() < 2 {
+                if args.is_empty() {
                     println!("type: missing argument");
                     continue;
                 }
 
-                let command = parts[1];
+                let cmd = args[0];
 
-                // Builtin commands
-                match command {
+                match cmd {
                     "echo" | "exit" | "type" => {
-                        println!("{} is a shell builtin", command);
+                        println!("{} is a shell builtin", cmd);
                     }
 
-                    // Search PATH
-                    _ => match find_executable(command) {
+                    _ => match find_executable(cmd) {
                         Some(path) => {
-                            println!("{} is {}", command, path);
+                            println!("{} is {}", cmd, path.display());
                         }
+
                         None => {
-                            println!("{}: not found", command);
+                            println!("{}: not found", cmd);
                         }
                     },
                 }
             }
 
-            // Unknown command
-            _ => {
-                println!("{}: command not found", input);
-            }
+            // External command
+            _ => match find_executable(command) {
+                Some(path) => {
+                    let result = Command::new(path).args(args).status();
+
+                    if result.is_err() {
+                        println!("{}: command not found", command);
+                    }
+                }
+
+                None => {
+                    println!("{}: command not found", command);
+                }
+            },
         }
     }
 }
 
-// Function to search executable in PATH
-fn find_executable(command: &str) -> Option<String> {
-    // Get PATH environment variable
-    let path_var = env::var("PATH").unwrap_or_default();
+// Find executable in PATH
+fn find_executable(command: &str) -> Option<PathBuf> {
+    let path_env = env::var("PATH").unwrap_or_default();
 
-    // Split PATH using OS-specific separator
-    for dir in env::split_paths(&path_var) {
+    for dir in env::split_paths(&path_env) {
         let full_path = dir.join(command);
 
-        // Check if file exists
-        if full_path.exists() {
-            // Check execute permission
-            if is_executable(&full_path) {
-                return Some(full_path.to_string_lossy().to_string());
-            }
+        // Only check if file exists
+        if full_path.is_file() {
+            return Some(full_path);
         }
     }
 
     None
-}
-
-// Check execute permission
-fn is_executable(path: &Path) -> bool {
-    if let Ok(metadata) = fs::metadata(path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let permissions = metadata.permissions();
-            let mode = permissions.mode();
-
-            // Check execute bits
-            return mode & 0o111 != 0;
-        }
-
-        #[cfg(windows)]
-        {
-            // Windows: just check file exists
-            return metadata.is_file();
-        }
-    }
-
-    false
 }
