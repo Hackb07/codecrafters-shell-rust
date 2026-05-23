@@ -1092,7 +1092,7 @@ fn main() {
                     "history" => {
                         for i in 0..rl.history().len() {
                             if let Ok(Some(entry)) = rl.history().get(i, SearchDirection::Reverse) {
-                                println!("{:>5}  {}", i + 1, entry.line);
+                                println!("{:>5}  {}", i + 1, entry.entry);
                             }
                         }
                     }
