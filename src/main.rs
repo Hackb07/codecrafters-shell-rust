@@ -26,7 +26,7 @@ use std::os::unix::process::CommandExt;
 // BUILTINS
 // ======================
 
-const BUILTINS: [&str; 6] = ["echo", "exit", "pwd", "cd", "type", "complete"];
+const BUILTINS: [&str; 7] = ["echo", "exit", "pwd", "cd", "type", "complete", "jobs"];
 
 // ======================
 // COMPLETER
@@ -471,6 +471,10 @@ fn main() {
                 match command.as_str() {
                     "exit" => {
                         break;
+                    }
+
+                    "jobs" => {
+                        // Empty implementation
                     }
 
                     "echo" => {
