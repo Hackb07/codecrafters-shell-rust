@@ -45,22 +45,76 @@ impl Completer for ShellCompleter {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        // Builtins
         let builtins = ["echo", "exit"];
 
         let input = &line[..pos];
 
-        let matches: Vec<Pair> = builtins
-            .iter()
-            .filter(|cmd| cmd.starts_with(input))
-            .map(|cmd| Pair {
-                display: cmd.to_string(),
+        let mut matches: Vec<Pair> = Vec::new();
 
-                // autocomplete with space
-                replacement: format!("{} ", cmd),
-            })
-            .collect();
+        // ======================
+        // BUILTIN COMPLETION
+        // ======================
 
-        // No matches -> bell character
+        for builtin in builtins {
+            if builtin.starts_with(input) {
+                matches.push(Pair {
+                    display: builtin.to_string(),
+
+                    replacement: format!("{} ", builtin),
+                });
+            }
+        }
+
+        // ======================
+        // EXECUTABLE COMPLETION
+        // ======================
+
+        let path_env = env::var("PATH").unwrap_or_default();
+
+        for dir in env::split_paths(&path_env) {
+            // Skip invalid dirs
+            if !dir.exists() {
+                continue;
+            }
+
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+
+                Err(_) => continue,
+            };
+
+            for entry in entries {
+                let entry = match entry {
+                    Ok(e) => e,
+
+                    Err(_) => continue,
+                };
+
+                let path = entry.path();
+
+                if path.is_file() && is_executable(&path) {
+                    if let Some(name) = path.file_name() {
+                        let name = name.to_string_lossy();
+
+                        if name.starts_with(input) {
+                            matches.push(Pair {
+                                display: name.to_string(),
+
+                                replacement: format!("{} ", name),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove duplicates
+        matches.sort_by(|a, b| a.display.cmp(&b.display));
+
+        matches.dedup_by(|a, b| a.display == b.display);
+
+        // Bell if no matches
         if matches.is_empty() {
             print!("\x07");
 
