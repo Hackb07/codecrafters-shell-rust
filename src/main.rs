@@ -54,9 +54,18 @@ impl Completer for ShellCompleter {
             .filter(|cmd| cmd.starts_with(input))
             .map(|cmd| Pair {
                 display: cmd.to_string(),
+
+                // autocomplete with space
                 replacement: format!("{} ", cmd),
             })
             .collect();
+
+        // No matches -> bell character
+        if matches.is_empty() {
+            print!("\x07");
+
+            std::io::stdout().flush().unwrap();
+        }
 
         Ok((0, matches))
     }
@@ -286,7 +295,6 @@ fn main() {
                             let _ = open_file(file_path, *append);
                         }
 
-                        // stdout redirect
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
