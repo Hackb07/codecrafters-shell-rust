@@ -8,6 +8,7 @@ use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
 };
 
+use std::cell::RefCell;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -24,7 +25,10 @@ use std::os::unix::process::CommandExt;
 // TAB COMPLETION
 // ======================
 
-struct ShellCompleter;
+struct ShellCompleter {
+    last_input: RefCell<String>,
+    tab_count: RefCell<u8>,
+}
 
 impl Helper for ShellCompleter {}
 
@@ -45,12 +49,11 @@ impl Completer for ShellCompleter {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        // Builtins
         let builtins = ["echo", "exit"];
 
         let input = &line[..pos];
 
-        let mut matches: Vec<Pair> = Vec::new();
+        let mut matches: Vec<String> = Vec::new();
 
         // ======================
         // BUILTIN COMPLETION
@@ -58,11 +61,7 @@ impl Completer for ShellCompleter {
 
         for builtin in builtins {
             if builtin.starts_with(input) {
-                matches.push(Pair {
-                    display: builtin.to_string(),
-
-                    replacement: format!("{} ", builtin),
-                });
+                matches.push(builtin.to_string());
             }
         }
 
@@ -73,7 +72,6 @@ impl Completer for ShellCompleter {
         let path_env = env::var("PATH").unwrap_or_default();
 
         for dir in env::split_paths(&path_env) {
-            // Skip invalid dirs
             if !dir.exists() {
                 continue;
             }
@@ -95,14 +93,10 @@ impl Completer for ShellCompleter {
 
                 if path.is_file() && is_executable(&path) {
                     if let Some(name) = path.file_name() {
-                        let name = name.to_string_lossy();
+                        let name = name.to_string_lossy().to_string();
 
                         if name.starts_with(input) {
-                            matches.push(Pair {
-                                display: name.to_string(),
-
-                                replacement: format!("{} ", name),
-                            });
+                            matches.push(name);
                         }
                     }
                 }
@@ -110,18 +104,74 @@ impl Completer for ShellCompleter {
         }
 
         // Remove duplicates
-        matches.sort_by(|a, b| a.display.cmp(&b.display));
+        matches.sort();
+        matches.dedup();
 
-        matches.dedup_by(|a, b| a.display == b.display);
+        // ======================
+        // NO MATCHES
+        // ======================
 
-        // Bell if no matches
         if matches.is_empty() {
             print!("\x07");
 
             std::io::stdout().flush().unwrap();
+
+            return Ok((0, vec![]));
         }
 
-        Ok((0, matches))
+        // ======================
+        // SINGLE MATCH
+        // ======================
+
+        if matches.len() == 1 {
+            let completion = matches[0].clone();
+
+            return Ok((
+                0,
+                vec![Pair {
+                    display: completion.clone(),
+
+                    replacement: format!("{} ", completion),
+                }],
+            ));
+        }
+
+        // ======================
+        // MULTIPLE MATCHES
+        // ======================
+
+        let mut last_input = self.last_input.borrow_mut();
+
+        let mut tab_count = self.tab_count.borrow_mut();
+
+        if *last_input == input {
+            *tab_count += 1;
+        } else {
+            *tab_count = 1;
+            *last_input = input.to_string();
+        }
+
+        // First TAB -> bell
+        if *tab_count == 1 {
+            print!("\x07");
+
+            std::io::stdout().flush().unwrap();
+
+            return Ok((0, vec![]));
+        }
+
+        // Second TAB -> show matches
+        println!();
+
+        println!("{}", matches.join("  "));
+
+        print!("$ {}", input);
+
+        std::io::stdout().flush().unwrap();
+
+        *tab_count = 0;
+
+        Ok((0, vec![]))
     }
 }
 
@@ -134,9 +184,15 @@ fn main() {
         .completion_type(CompletionType::List)
         .build();
 
+    let helper = ShellCompleter {
+        last_input: RefCell::new(String::new()),
+
+        tab_count: RefCell::new(0),
+    };
+
     let mut rl = Editor::<ShellCompleter, DefaultHistory>::with_config(config).unwrap();
 
-    rl.set_helper(Some(ShellCompleter));
+    rl.set_helper(Some(helper));
 
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
 
@@ -157,10 +213,8 @@ fn main() {
                     continue;
                 }
 
-                // stdout redirect
                 let mut stdout_redirect: Option<(String, bool)> = None;
 
-                // stderr redirect
                 let mut stderr_redirect: Option<(String, bool)> = None;
 
                 let mut cleaned_parts = Vec::new();
@@ -227,20 +281,13 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // ======================
-                    // EXIT
-                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // ======================
-                    // ECHO
-                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        // Create stderr file even if unused
                         if let Some((file_path, append)) = &stderr_redirect {
                             let _ = open_file(file_path, *append);
                         }
@@ -254,9 +301,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // PWD
-                    // ======================
                     "pwd" => {
                         let output = match env::current_dir() {
                             Ok(path) => format!("{}\n", path.display()),
@@ -264,7 +308,6 @@ fn main() {
                             Err(_) => "pwd: unable to get current directory\n".to_string(),
                         };
 
-                        // Create stderr file even if unused
                         if let Some((file_path, append)) = &stderr_redirect {
                             let _ = open_file(file_path, *append);
                         }
@@ -278,9 +321,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // CD
-                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -308,21 +348,8 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // TYPE
-                    // ======================
                     "type" => {
                         if args.is_empty() {
-                            let error_output = "type: missing argument\n";
-
-                            if let Some((file_path, append)) = stderr_redirect {
-                                let mut file = open_file(&file_path, append);
-
-                                file.write_all(error_output.as_bytes()).unwrap();
-                            } else {
-                                eprint!("{}", error_output);
-                            }
-
                             continue;
                         }
 
@@ -344,11 +371,6 @@ fn main() {
                             },
                         };
 
-                        // Create stderr file even if unused
-                        if let Some((file_path, append)) = &stderr_redirect {
-                            let _ = open_file(file_path, *append);
-                        }
-
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
@@ -358,51 +380,44 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // EXTERNAL COMMANDS
-                    // ======================
-                    _ => {
-                        match find_executable(command) {
-                            Some(path) => {
-                                let mut cmd = Command::new(&path);
+                    _ => match find_executable(command) {
+                        Some(path) => {
+                            let mut cmd = Command::new(&path);
 
-                                #[cfg(unix)]
-                                {
-                                    cmd.arg0(command);
-                                }
-
-                                cmd.args(args);
-
-                                // stdout redirect ONLY
-                                if let Some((file_path, append)) = stdout_redirect {
-                                    let file = open_file(&file_path, append);
-
-                                    cmd.stdout(Stdio::from(file));
-                                }
-
-                                // stderr redirect ONLY
-                                if let Some((file_path, append)) = stderr_redirect {
-                                    let file = open_file(&file_path, append);
-
-                                    cmd.stderr(Stdio::from(file));
-                                }
-
-                                match cmd.spawn() {
-                                    Ok(mut child) => {
-                                        child.wait().unwrap();
-                                    }
-
-                                    Err(_) => {
-                                        eprintln!("{}: command not found", command);
-                                    }
-                                }
+                            #[cfg(unix)]
+                            {
+                                cmd.arg0(command);
                             }
 
-                            None => {
-                                eprintln!("{}: command not found", command);
+                            cmd.args(args);
+
+                            if let Some((file_path, append)) = stdout_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stdout(Stdio::from(file));
+                            }
+
+                            if let Some((file_path, append)) = stderr_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stderr(Stdio::from(file));
+                            }
+
+                            match cmd.spawn() {
+                                Ok(mut child) => {
+                                    child.wait().unwrap();
+                                }
+
+                                Err(_) => {
+                                    eprintln!("{}: command not found", command);
+                                }
                             }
                         }
-                    }
+
+                        None => {
+                            eprintln!("{}: command not found", command);
+                        }
+                    },
                 }
             }
 
@@ -455,7 +470,6 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
-        // Backslashes inside double quotes
         if ch == '\\' && in_double_quotes {
             if i + 1 < chars.len() {
                 let next = chars[i + 1];
@@ -479,7 +493,6 @@ fn parse_input(input: &str) -> Vec<String> {
             }
         }
 
-        // Redirect operators
         if !in_single_quotes && !in_double_quotes {
             let redirects = ["2>>", "1>>", ">>", "2>", "1>", ">"];
 
