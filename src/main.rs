@@ -137,6 +137,24 @@ impl Completer for ShellCompleter {
         }
 
         // ======================
+        // LONGEST COMMON PREFIX
+        // ======================
+
+        let lcp = longest_common_prefix(&matches);
+
+        // autocomplete to LCP
+        if lcp.len() > input.len() {
+            return Ok((
+                0,
+                vec![Pair {
+                    display: lcp.clone(),
+
+                    replacement: lcp,
+                }],
+            ));
+        }
+
+        // ======================
         // MULTIPLE MATCHES
         // ======================
 
@@ -281,10 +299,16 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
@@ -301,6 +325,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
                         let output = match env::current_dir() {
                             Ok(path) => format!("{}\n", path.display()),
@@ -321,6 +348,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -348,6 +378,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -380,6 +413,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
@@ -435,6 +471,30 @@ fn main() {
             }
         }
     }
+}
+
+// ======================
+// LONGEST COMMON PREFIX
+// ======================
+
+fn longest_common_prefix(strings: &[String]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+
+    let mut prefix = strings[0].clone();
+
+    for s in strings.iter().skip(1) {
+        while !s.starts_with(&prefix) {
+            prefix.pop();
+
+            if prefix.is_empty() {
+                break;
+            }
+        }
+    }
+
+    prefix
 }
 
 // ======================
