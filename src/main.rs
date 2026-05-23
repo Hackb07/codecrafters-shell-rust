@@ -467,9 +467,11 @@ fn main() {
                     // COMPLETE BUILTIN
                     // ======================
                     "complete" => {
-                        // No-op for this stage
+                        // Handle: complete -p <command>
+                        if args.len() >= 2 && args[0] == "-p" {
+                            println!("complete: {}: no completion specification", args[1]);
+                        }
                     }
-
                     // ======================
                     // EXTERNAL COMMANDS
                     // ======================
