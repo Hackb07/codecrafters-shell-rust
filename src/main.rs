@@ -4,13 +4,16 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 fn main() {
     loop {
-        // Shell prompt
+        // Prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read user input
+        // Read input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -21,7 +24,7 @@ fn main() {
             continue;
         }
 
-        // Split command and arguments
+        // Split command and args
         let parts: Vec<&str> = input.split_whitespace().collect();
 
         let command = parts[0];
@@ -64,20 +67,12 @@ fn main() {
                 }
             }
 
-            // External commands
-            _ => {
-                match find_executable(command) {
-                    Some(path) => {
-                        // Get executable directory
-                        let parent_dir = path.parent().unwrap();
-
-                        // Get executable filename only
-                        let executable_name = path.file_name().unwrap().to_str().unwrap();
-
-                        let result = Command::new(format!("./{}", executable_name))
-                            .args(args)
-                            .current_dir(parent_dir)
-                            .spawn();
+            // External programs
+            _ => match find_executable(command) {
+                Some(path) => {
+                    #[cfg(unix)]
+                    {
+                        let result = Command::new(&path).arg0(command).args(args).spawn();
 
                         match result {
                             Ok(mut child) => {
@@ -90,16 +85,31 @@ fn main() {
                         }
                     }
 
-                    None => {
-                        println!("{}: command not found", command);
+                    #[cfg(windows)]
+                    {
+                        let result = Command::new(&path).args(args).spawn();
+
+                        match result {
+                            Ok(mut child) => {
+                                child.wait().unwrap();
+                            }
+
+                            Err(_) => {
+                                println!("{}: command not found", command);
+                            }
+                        }
                     }
                 }
-            }
+
+                None => {
+                    println!("{}: command not found", command);
+                }
+            },
         }
     }
 }
 
-// Search executable in PATH
+// Find executable in PATH
 fn find_executable(command: &str) -> Option<PathBuf> {
     let path_env = env::var("PATH").unwrap_or_default();
 
@@ -114,7 +124,7 @@ fn find_executable(command: &str) -> Option<PathBuf> {
     None
 }
 
-// Check execute permission
+// Check executable permissions
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
