@@ -16,7 +16,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read user input
+        // Read input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -27,14 +27,14 @@ fn main() {
             continue;
         }
 
-        // Parse input
+        // Parse shell input
         let mut parts = parse_input(input);
 
         if parts.is_empty() {
             continue;
         }
 
-        // Redirection handling
+        // Redirection targets
         let mut stdout_redirect: Option<String> = None;
         let mut stderr_redirect: Option<String> = None;
 
@@ -90,6 +90,11 @@ fn main() {
             "echo" => {
                 let output = format!("{}\n", args.join(" "));
 
+                // Create stderr file even if unused
+                if let Some(file_path) = &stderr_redirect {
+                    File::create(file_path).unwrap();
+                }
+
                 if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
 
@@ -108,6 +113,11 @@ fn main() {
 
                     Err(_) => "pwd: unable to get current directory\n".to_string(),
                 };
+
+                // Create stderr file even if unused
+                if let Some(file_path) = &stderr_redirect {
+                    File::create(file_path).unwrap();
+                }
 
                 if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
@@ -143,6 +153,11 @@ fn main() {
                         file.write_all(error_output.as_bytes()).unwrap();
                     } else {
                         eprint!("{}", error_output);
+                    }
+                } else {
+                    // Create stderr file if unused
+                    if let Some(file_path) = stderr_redirect {
+                        File::create(file_path).unwrap();
                     }
                 }
             }
@@ -180,6 +195,11 @@ fn main() {
                         }
                     },
                 };
+
+                // Create stderr file even if unused
+                if let Some(file_path) = &stderr_redirect {
+                    File::create(file_path).unwrap();
+                }
 
                 if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
@@ -254,7 +274,7 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
-        // Backslash handling inside double quotes
+        // Backslashes inside double quotes
         if ch == '\\' && in_double_quotes {
             if i + 1 < chars.len() {
                 let next = chars[i + 1];
@@ -338,7 +358,7 @@ fn parse_input(input: &str) -> Vec<String> {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // Split arguments
+            // Split args
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -346,7 +366,7 @@ fn parse_input(input: &str) -> Vec<String> {
                 }
             }
 
-            // Normal characters
+            // Normal chars
             _ => {
                 current.push(ch);
             }
@@ -355,7 +375,7 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Push final argument
+    // Push final arg
     if !current.is_empty() {
         args.push(current);
     }
