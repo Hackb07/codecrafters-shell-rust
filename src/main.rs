@@ -165,6 +165,29 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
+        // Backslash handling inside double quotes
+        if ch == '\\' && in_double_quotes {
+            if i + 1 < chars.len() {
+                let next = chars[i + 1];
+
+                match next {
+                    '"' | '\\' => {
+                        current.push(next);
+                        i += 2;
+                        continue;
+                    }
+
+                    _ => {
+                        // Backslash preserved literally
+                        current.push('\\');
+                        current.push(next);
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+
         match ch {
             // Backslash outside quotes
             '\\' if !in_single_quotes && !in_double_quotes => {
@@ -185,7 +208,7 @@ fn parse_input(input: &str) -> Vec<String> {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // Argument split outside quotes
+            // Split arguments only outside quotes
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -202,7 +225,7 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Push last argument
+    // Push final argument
     if !current.is_empty() {
         args.push(current);
     }
