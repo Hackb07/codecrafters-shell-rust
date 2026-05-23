@@ -114,7 +114,19 @@ impl Completer for ShellCompleter {
             // FILENAME COMPLETION
             // ======================
 
-            let entries = match fs::read_dir(".") {
+            let (search_dir, file_prefix) = if let Some(idx) = prefix.rfind('/') {
+                (&prefix[..idx + 1], &prefix[idx + 1..])
+            } else {
+                ("", prefix)
+            };
+
+            let dir_path = if search_dir.is_empty() {
+                PathBuf::from(".")
+            } else {
+                PathBuf::from(search_dir)
+            };
+
+            let entries = match fs::read_dir(&dir_path) {
                 Ok(entries) => entries,
 
                 Err(_) => return Ok((0, vec![])),
@@ -132,8 +144,10 @@ impl Completer for ShellCompleter {
                 if let Some(name) = path.file_name() {
                     let name = name.to_string_lossy().to_string();
 
-                    if name.starts_with(prefix) {
-                        matches.push(name);
+                    if name.starts_with(file_prefix) {
+                        let full_name = format!("{}{}", search_dir, name);
+
+                        matches.push(full_name);
                     }
                 }
             }
@@ -346,10 +360,16 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
@@ -366,6 +386,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
                         let output = match env::current_dir() {
                             Ok(path) => format!("{}\n", path.display()),
@@ -386,6 +409,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -413,6 +439,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -445,6 +474,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
