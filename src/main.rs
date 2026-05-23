@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
 fn main() {
     loop {
-        // Prompt
+        // Shell prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
@@ -24,7 +27,7 @@ fn main() {
             continue;
         }
 
-        // Split command and args
+        // Split command and arguments
         let parts: Vec<&str> = input.split_whitespace().collect();
 
         let command = parts[0];
@@ -40,6 +43,17 @@ fn main() {
             "echo" => {
                 println!("{}", args.join(" "));
             }
+
+            // Builtin: pwd
+            "pwd" => match env::current_dir() {
+                Ok(path) => {
+                    println!("{}", path.display());
+                }
+
+                Err(_) => {
+                    println!("pwd: unable to get current directory");
+                }
+            },
 
             // Builtin: type
             "type" => {
@@ -67,7 +81,7 @@ fn main() {
                 }
             }
 
-            // External programs
+            // External commands
             _ => match find_executable(command) {
                 Some(path) => {
                     #[cfg(unix)]
@@ -128,8 +142,6 @@ fn find_executable(command: &str) -> Option<PathBuf> {
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-
         if let Ok(metadata) = fs::metadata(path) {
             let mode = metadata.permissions().mode();
 
