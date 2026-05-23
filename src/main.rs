@@ -26,7 +26,7 @@ use std::os::unix::process::CommandExt;
 // BUILTINS
 // ======================
 
-const BUILTINS: [&str; 7] = ["echo", "exit", "pwd", "cd", "type", "complete", "jobs"];
+const BUILTINS: [&str; 8] = ["echo", "exit", "pwd", "cd", "type", "complete", "jobs", "history"];
 
 // ======================
 // JOB
@@ -1082,6 +1082,17 @@ fn main() {
                             i -= 1;
                             if !running[i] {
                                 jobs.remove(i);
+                            }
+                        }
+                    }
+
+                    // ======================
+                    // HISTORY
+                    // ======================
+                    "history" => {
+                        for i in 0..rl.history().len() {
+                            if let Some(entry) = rl.history().get(i) {
+                                println!("{:>5}  {}", i + 1, entry);
                             }
                         }
                     }
