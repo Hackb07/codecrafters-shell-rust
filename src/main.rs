@@ -64,7 +64,7 @@ impl Completer for ShellCompleter {
         let current_arg = &input[last_space..];
 
         // ======================
-        // REGISTERED COMPLETERS
+        // CUSTOM COMPLETERS
         // ======================
 
         if input.contains(' ') {
@@ -93,6 +93,8 @@ impl Completer for ShellCompleter {
                         .arg(arg1)
                         .arg(arg2)
                         .arg(arg3)
+                        .env("COMP_LINE", input)
+                        .env("COMP_POINT", pos.to_string())
                         .output();
 
                     if let Ok(output) = output {
@@ -100,7 +102,6 @@ impl Completer for ShellCompleter {
 
                         let lines: Vec<&str> = stdout.lines().collect();
 
-                        // SINGLE COMPLETION
                         if lines.len() == 1 {
                             let candidate = lines[0].trim();
 
@@ -129,12 +130,14 @@ impl Completer for ShellCompleter {
         // ======================
 
         if is_command_position {
+            // BUILTINS
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
                     matches.push((builtin.to_string(), false));
                 }
             }
 
+            // PATH EXECUTABLES
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -431,10 +434,16 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
@@ -451,10 +460,16 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
                         println!("{}", env::current_dir().unwrap().display());
                     }
 
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -471,6 +486,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -493,6 +511,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // COMPLETE
+                    // ======================
                     "complete" => {
                         // REGISTER
                         if args.len() >= 3 && args[0] == "-C" {
@@ -524,6 +545,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
@@ -582,7 +606,7 @@ fn main() {
 }
 
 // ======================
-// LCP
+// LONGEST COMMON PREFIX
 // ======================
 
 fn longest_common_prefix(strings: &[String]) -> String {
