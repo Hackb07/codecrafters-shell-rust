@@ -27,7 +27,7 @@ fn main() {
             continue;
         }
 
-        // Parse command line
+        // Parse shell input
         let parts = parse_input(input);
 
         if parts.is_empty() {
@@ -150,7 +150,7 @@ fn main() {
     }
 }
 
-// Parse shell input with single + double quotes
+// Parse shell input
 fn parse_input(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
@@ -166,17 +166,26 @@ fn parse_input(input: &str) -> Vec<String> {
         let ch = chars[i];
 
         match ch {
-            // Single quote
+            // Backslash outside quotes
+            '\\' if !in_single_quotes && !in_double_quotes => {
+                i += 1;
+
+                if i < chars.len() {
+                    current.push(chars[i]);
+                }
+            }
+
+            // Single quotes
             '\'' if !in_double_quotes => {
                 in_single_quotes = !in_single_quotes;
             }
 
-            // Double quote
+            // Double quotes
             '"' if !in_single_quotes => {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // Split only outside quotes
+            // Argument split outside quotes
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -193,7 +202,7 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Push final argument
+    // Push last argument
     if !current.is_empty() {
         args.push(current);
     }
