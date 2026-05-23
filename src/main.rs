@@ -4,13 +4,26 @@ use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
+use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 
-#[derive(Helper, Hinter, Validator, Highlighter)]
+// Shell completer
 struct ShellCompleter;
 
-// Custom TAB completion
+// Implement Helper manually
+impl Helper for ShellCompleter {}
+
+// Optional trait impls
+impl Hinter for ShellCompleter {
+    type Hint = String;
+}
+
+impl Highlighter for ShellCompleter {}
+
+impl Validator for ShellCompleter {}
+
+// TAB completion
 impl Completer for ShellCompleter {
     type Candidate = Pair;
 
@@ -20,16 +33,13 @@ impl Completer for ShellCompleter {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        // Builtin commands
         let builtins = ["echo", "exit"];
 
-        // Current typed text
         let input = &line[..pos];
 
         let mut matches = Vec::new();
 
         for builtin in builtins {
-            // Match partial input
             if builtin.starts_with(input) {
                 matches.push(Pair {
                     display: builtin.to_string(),
@@ -40,20 +50,17 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // Replace from beginning of line
         Ok((0, matches))
     }
 }
 
 fn main() {
-    // Create rustyline editor
-    let mut rl = Editor::<ShellCompleter>::new().unwrap();
+    // Editor requires DefaultHistory in rustyline v14
+    let mut rl = Editor::<ShellCompleter, DefaultHistory>::new().unwrap();
 
-    // Attach completer
     rl.set_helper(Some(ShellCompleter));
 
     loop {
-        // Read line with prompt
         let readline = rl.readline("$ ");
 
         match readline {
