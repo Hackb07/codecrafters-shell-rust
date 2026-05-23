@@ -230,7 +230,6 @@ impl Completer for ShellCompleter {
         }
 
         // FILE / DIR COMPLETION
-
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
             (&current_arg[..idx + 1], &current_arg[idx + 1..])
         } else {
@@ -543,6 +542,14 @@ fn main() {
                                 helper.completions.borrow_mut().insert(cmd, script);
                             }
                         }
+                        // REMOVE
+                        else if args.len() >= 2 && args[0] == "-r" {
+                            let cmd = &args[1];
+
+                            if let Some(helper) = rl.helper_mut() {
+                                helper.completions.borrow_mut().remove(cmd);
+                            }
+                        }
                         // PRINT
                         else if args.len() >= 2 && args[0] == "-p" {
                             let cmd = &args[1];
@@ -639,7 +646,6 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
-        // DOUBLE QUOTE ESCAPES
         if ch == '\\' && in_double_quotes {
             if i + 1 < chars.len() {
                 let next = chars[i + 1];
@@ -664,7 +670,6 @@ fn parse_input(input: &str) -> Vec<String> {
         }
 
         match ch {
-            // ESCAPE
             '\\' if !in_single_quotes && !in_double_quotes => {
                 i += 1;
 
@@ -673,17 +678,14 @@ fn parse_input(input: &str) -> Vec<String> {
                 }
             }
 
-            // SINGLE QUOTES
             '\'' if !in_double_quotes => {
                 in_single_quotes = !in_single_quotes;
             }
 
-            // DOUBLE QUOTES
             '"' if !in_single_quotes => {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // SPACES
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -692,7 +694,6 @@ fn parse_input(input: &str) -> Vec<String> {
                 }
             }
 
-            // 1> 1>> 2> 2>>
             '1' | '2'
                 if !in_single_quotes
                     && !in_double_quotes
@@ -721,7 +722,6 @@ fn parse_input(input: &str) -> Vec<String> {
                 args.push(token);
             }
 
-            // > >>
             '>' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
