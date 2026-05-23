@@ -7,8 +7,8 @@ use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
 };
-
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -281,6 +281,34 @@ impl Completer for ShellCompleter {
 // ======================
 // MAIN
 // ======================
+// ======================
+
+fn handle_complete(args: &[String], completions: &mut HashMap<String, String>) {
+    // complete -C <path> <command>
+    if args.len() >= 3 && args[0] == "-C" {
+        let script_path = args[1].clone();
+        let command = args[2].clone();
+
+        completions.insert(command, script_path);
+
+        return;
+    }
+
+    // complete -p <command>
+    if args.len() >= 2 && args[0] == "-p" {
+        let command = &args[1];
+
+        match completions.get(command) {
+            Some(path) => {
+                println!("complete -C '{}' {}", path, command);
+            }
+
+            None => {
+                println!("complete: {}: no completion specification", command);
+            }
+        }
+    }
+}
 
 fn main() {
     let config = Config::builder()
@@ -298,6 +326,8 @@ fn main() {
     rl.set_helper(Some(helper));
 
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
+
+    let mut completions: HashMap<String, String> = HashMap::new();
 
     loop {
         let readline = rl.readline("$ ");
@@ -467,10 +497,7 @@ fn main() {
                     // COMPLETE BUILTIN
                     // ======================
                     "complete" => {
-                        // Handle: complete -p <command>
-                        if args.len() >= 2 && args[0] == "-p" {
-                            println!("complete: {}: no completion specification", args[1]);
-                        }
+                        handle_complete(args, &mut completions);
                     }
                     // ======================
                     // EXTERNAL COMMANDS
