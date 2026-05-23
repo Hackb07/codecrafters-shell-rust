@@ -3,7 +3,7 @@ use std::io::{self, Write};
 fn main() {
     loop {
         // Print shell prompt
-        print!("$ ");
+        print!(">> ");
         io::stdout().flush().unwrap();
 
         // Read user input
