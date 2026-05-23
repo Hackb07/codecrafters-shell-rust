@@ -34,6 +34,7 @@ fn main() {
             continue;
         }
 
+        // Executable name can now be quoted
         let command = &parts[0];
         let args = &parts[1..];
 
@@ -178,7 +179,6 @@ fn parse_input(input: &str) -> Vec<String> {
                     }
 
                     _ => {
-                        // Backslash preserved literally
                         current.push('\\');
                         current.push(next);
                         i += 2;
@@ -208,7 +208,7 @@ fn parse_input(input: &str) -> Vec<String> {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // Split arguments only outside quotes
+            // Split arguments outside quotes
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
