@@ -7,6 +7,7 @@ use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
 };
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
@@ -28,12 +29,14 @@ use std::os::unix::process::CommandExt;
 const BUILTINS: [&str; 6] = ["echo", "exit", "pwd", "cd", "type", "complete"];
 
 // ======================
-// TAB COMPLETION
+// TAB COMPLETER
 // ======================
 
 struct ShellCompleter {
     last_input: RefCell<String>,
     tab_count: RefCell<u8>,
+
+    completions: RefCell<HashMap<String, String>>,
 }
 
 impl Helper for ShellCompleter {}
@@ -57,37 +60,68 @@ impl Completer for ShellCompleter {
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let input = &line[..pos];
 
-        // ======================
-        // CURRENT ARGUMENT
-        // ======================
-
         let last_space = input.rfind(' ').map(|i| i + 1).unwrap_or(0);
 
         let current_arg = &input[last_space..];
 
-        let mut matches: Vec<(String, bool)> = Vec::new();
+        // ======================
+        // REGISTERED COMPLETERS
+        // ======================
 
-        // ======================
-        // COMMAND POSITION
-        // ======================
+        if input.contains(' ') {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+
+            if !parts.is_empty() {
+                let command_name = parts[0];
+
+                let completions = self.completions.borrow();
+
+                if let Some(script_path) = completions.get(command_name) {
+                    let output = Command::new(script_path).output();
+
+                    if let Ok(output) = output {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+
+                        let lines: Vec<&str> = stdout.lines().collect();
+
+                        // This stage guarantees
+                        // exactly one completion
+                        if lines.len() == 1 {
+                            let candidate = lines[0].trim();
+
+                            let replacement = format!("{}{} ", &input[..last_space], candidate);
+
+                            return Ok((
+                                0,
+                                vec![Pair {
+                                    display: candidate.to_string(),
+
+                                    replacement,
+                                }],
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut matches: Vec<(String, bool)> = Vec::new();
 
         let is_command_position = !input.contains(' ');
 
-        if is_command_position {
-            // ======================
-            // BUILTINS
-            // ======================
+        // ======================
+        // COMMAND COMPLETION
+        // ======================
 
+        if is_command_position {
+            // Builtins
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
                     matches.push((builtin.to_string(), false));
                 }
             }
 
-            // ======================
-            // EXECUTABLES
-            // ======================
-
+            // PATH executables
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -124,9 +158,7 @@ impl Completer for ShellCompleter {
         }
 
         // ======================
-        // FILE / DIRECTORY
-        // COMPLETION FOR
-        // ANY ARGUMENT
+        // FILE/DIR COMPLETION
         // ======================
 
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
@@ -243,7 +275,7 @@ impl Completer for ShellCompleter {
             *last_input = input.to_string();
         }
 
-        // FIRST TAB -> BELL
+        // First TAB -> bell
         if *tab_count == 1 {
             print!("\x07");
 
@@ -252,7 +284,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // SECOND TAB -> SHOW LIST
+        // Second TAB -> list
         println!();
 
         let display_matches: Vec<String> = matches
@@ -281,34 +313,6 @@ impl Completer for ShellCompleter {
 // ======================
 // MAIN
 // ======================
-// ======================
-
-fn handle_complete(args: &[String], completions: &mut HashMap<String, String>) {
-    // complete -C <path> <command>
-    if args.len() >= 3 && args[0] == "-C" {
-        let script_path = args[1].clone();
-        let command = args[2].clone();
-
-        completions.insert(command, script_path);
-
-        return;
-    }
-
-    // complete -p <command>
-    if args.len() >= 2 && args[0] == "-p" {
-        let command = &args[1];
-
-        match completions.get(command) {
-            Some(path) => {
-                println!("complete -C '{}' {}", path, command);
-            }
-
-            None => {
-                println!("complete: {}: no completion specification", command);
-            }
-        }
-    }
-}
 
 fn main() {
     let config = Config::builder()
@@ -319,6 +323,8 @@ fn main() {
         last_input: RefCell::new(String::new()),
 
         tab_count: RefCell::new(0),
+
+        completions: RefCell::new(HashMap::new()),
     };
 
     let mut rl = Editor::<ShellCompleter, DefaultHistory>::with_config(config).unwrap();
@@ -326,8 +332,6 @@ fn main() {
     rl.set_helper(Some(helper));
 
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
-
-    let mut completions: HashMap<String, String> = HashMap::new();
 
     loop {
         let readline = rl.readline("$ ");
@@ -422,17 +426,16 @@ fn main() {
                     }
 
                     // ======================
-                    // ECHO BUILTIN
+                    // ECHO
                     // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        // CREATE stderr redirect file even if unused
+                        // create stderr file if needed
                         if let Some((file_path, append)) = &stderr_redirect {
                             let _ = open_file(file_path, *append);
                         }
 
-                        // stdout redirect
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
@@ -494,11 +497,39 @@ fn main() {
                     }
 
                     // ======================
-                    // COMPLETE BUILTIN
+                    // COMPLETE
                     // ======================
                     "complete" => {
-                        handle_complete(args, &mut completions);
+                        // complete -C path cmd
+                        if args.len() >= 3 && args[0] == "-C" {
+                            let script = args[1].clone();
+
+                            let cmd = args[2].clone();
+
+                            if let Some(helper) = rl.helper_mut() {
+                                helper.completions.borrow_mut().insert(cmd, script);
+                            }
+                        }
+                        // complete -p cmd
+                        else if args.len() >= 2 && args[0] == "-p" {
+                            let cmd = &args[1];
+
+                            if let Some(helper) = rl.helper_mut() {
+                                let completions = helper.completions.borrow();
+
+                                match completions.get(cmd) {
+                                    Some(path) => {
+                                        println!("complete -C '{}' {}", path, cmd);
+                                    }
+
+                                    None => {
+                                        println!("complete: {}: no completion specification", cmd);
+                                    }
+                                }
+                            }
+                        }
                     }
+
                     // ======================
                     // EXTERNAL COMMANDS
                     // ======================
@@ -560,7 +591,7 @@ fn main() {
 }
 
 // ======================
-// LONGEST COMMON PREFIX
+// LCP
 // ======================
 
 fn longest_common_prefix(strings: &[String]) -> String {
