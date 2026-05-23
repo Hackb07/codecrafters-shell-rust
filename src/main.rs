@@ -35,7 +35,6 @@ const BUILTINS: [&str; 6] = ["echo", "exit", "pwd", "cd", "type", "complete"];
 struct ShellCompleter {
     last_input: RefCell<String>,
     tab_count: RefCell<u8>,
-
     completions: RefCell<HashMap<String, String>>,
 }
 
@@ -69,23 +68,39 @@ impl Completer for ShellCompleter {
         // ======================
 
         if input.contains(' ') {
-            let parts: Vec<&str> = input.split_whitespace().collect();
+            let words: Vec<&str> = input.split_whitespace().collect();
 
-            if !parts.is_empty() {
-                let command_name = parts[0];
+            if !words.is_empty() {
+                let command_name = words[0];
 
                 let completions = self.completions.borrow();
 
                 if let Some(script_path) = completions.get(command_name) {
-                    let output = Command::new(script_path).output();
+                    // argv[1]
+                    let arg1 = command_name;
+
+                    // argv[2]
+                    let arg2 = current_arg;
+
+                    // argv[3]
+                    let arg3 = if words.len() >= 2 {
+                        words.get(words.len() - 2).unwrap_or(&"")
+                    } else {
+                        &""
+                    };
+
+                    let output = Command::new(script_path)
+                        .arg(arg1)
+                        .arg(arg2)
+                        .arg(arg3)
+                        .output();
 
                     if let Ok(output) = output {
                         let stdout = String::from_utf8_lossy(&output.stdout);
 
                         let lines: Vec<&str> = stdout.lines().collect();
 
-                        // This stage guarantees
-                        // exactly one completion
+                        // SINGLE COMPLETION
                         if lines.len() == 1 {
                             let candidate = lines[0].trim();
 
@@ -114,14 +129,12 @@ impl Completer for ShellCompleter {
         // ======================
 
         if is_command_position {
-            // Builtins
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
                     matches.push((builtin.to_string(), false));
                 }
             }
 
-            // PATH executables
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -158,7 +171,7 @@ impl Completer for ShellCompleter {
         }
 
         // ======================
-        // FILE/DIR COMPLETION
+        // FILE / DIR COMPLETION
         // ======================
 
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
@@ -275,7 +288,7 @@ impl Completer for ShellCompleter {
             *last_input = input.to_string();
         }
 
-        // First TAB -> bell
+        // FIRST TAB
         if *tab_count == 1 {
             print!("\x07");
 
@@ -284,7 +297,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // Second TAB -> list
+        // SECOND TAB
         println!();
 
         let display_matches: Vec<String> = matches
@@ -418,20 +431,13 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // ======================
-                    // EXIT
-                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // ======================
-                    // ECHO
-                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        // create stderr file if needed
                         if let Some((file_path, append)) = &stderr_redirect {
                             let _ = open_file(file_path, *append);
                         }
@@ -445,16 +451,10 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // PWD
-                    // ======================
                     "pwd" => {
                         println!("{}", env::current_dir().unwrap().display());
                     }
 
-                    // ======================
-                    // CD
-                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -471,9 +471,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // TYPE
-                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -496,11 +493,8 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // COMPLETE
-                    // ======================
                     "complete" => {
-                        // complete -C path cmd
+                        // REGISTER
                         if args.len() >= 3 && args[0] == "-C" {
                             let script = args[1].clone();
 
@@ -510,7 +504,7 @@ fn main() {
                                 helper.completions.borrow_mut().insert(cmd, script);
                             }
                         }
-                        // complete -p cmd
+                        // PRINT
                         else if args.len() >= 2 && args[0] == "-p" {
                             let cmd = &args[1];
 
@@ -530,9 +524,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // EXTERNAL COMMANDS
-                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
