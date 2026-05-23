@@ -27,13 +27,17 @@ fn main() {
             continue;
         }
 
-        // Split command and arguments
-        let parts: Vec<&str> = input.split_whitespace().collect();
+        // Parse command line with single quote support
+        let parts = parse_input(input);
 
-        let command = parts[0];
+        if parts.is_empty() {
+            continue;
+        }
+
+        let command = &parts[0];
         let args = &parts[1..];
 
-        match command {
+        match command.as_str() {
             // Builtin: exit
             "exit" => {
                 break;
@@ -62,15 +66,13 @@ fn main() {
                 }
 
                 let target_dir = if args[0] == "~" {
-                    // HOME directory
                     env::var("HOME").unwrap_or_default()
                 } else {
-                    args[0].to_string()
+                    args[0].clone()
                 };
 
                 let path = Path::new(&target_dir);
 
-                // Change directory
                 match env::set_current_dir(path) {
                     Ok(_) => {}
 
@@ -87,9 +89,9 @@ fn main() {
                     continue;
                 }
 
-                let cmd = args[0];
+                let cmd = &args[0];
 
-                match cmd {
+                match cmd.as_str() {
                     "echo" | "exit" | "type" | "pwd" | "cd" => {
                         println!("{} is a shell builtin", cmd);
                     }
@@ -146,6 +148,46 @@ fn main() {
             },
         }
     }
+}
+
+// Parse input with single quote support
+fn parse_input(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quotes = false;
+
+    let chars: Vec<char> = input.chars().collect();
+
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        match ch {
+            '\'' => {
+                in_single_quotes = !in_single_quotes;
+            }
+
+            ' ' | '\t' if !in_single_quotes => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+            }
+
+            _ => {
+                current.push(ch);
+            }
+        }
+
+        i += 1;
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
 }
 
 // Find executable in PATH
