@@ -520,37 +520,40 @@ fn main() {
                             running.push(job.child.try_wait().ok() == Some(None));
                         }
 
-                        let running_indices: Vec<usize> = running
+                        let max1 = jobs.iter().map(|j| j.id).max().unwrap_or(0);
+                        let max2 = jobs
                             .iter()
-                            .enumerate()
-                            .filter(|&(_, r)| *r)
-                            .map(|(i, _)| i)
-                            .collect();
+                            .filter(|j| j.id != max1)
+                            .map(|j| j.id)
+                            .max()
+                            .unwrap_or(0);
 
-                        let count = running_indices.len();
-
-                        for (pos, &idx) in running_indices.iter().enumerate() {
-                            let marker = if pos == count - 1 {
+                        for (i, &is_running) in running.iter().enumerate() {
+                            let marker = if jobs[i].id == max1 {
                                 '+'
-                            } else if pos == count - 2 {
+                            } else if jobs[i].id == max2 {
                                 '-'
                             } else {
                                 ' '
                             };
-                            println!("[{}]{}  {:<24}{}", jobs[idx].id, marker, "Running", jobs[idx].command);
-                        }
 
-                        for (i, &is_running) in running.iter().enumerate() {
                             if is_running {
-                                continue;
+                                println!(
+                                    "[{}]{}  {:<24}{}",
+                                    jobs[i].id, marker, "Running", jobs[i].command
+                                );
+                            } else {
+                                let cmd = jobs[i]
+                                    .command
+                                    .trim_end()
+                                    .trim_end_matches('&')
+                                    .trim_end()
+                                    .to_string();
+                                println!(
+                                    "[{}]{}  {:<24}{}",
+                                    jobs[i].id, marker, "Done", cmd
+                                );
                             }
-                            let cmd = jobs[i]
-                                .command
-                                .trim_end()
-                                .trim_end_matches('&')
-                                .trim_end()
-                                .to_string();
-                            println!("[{}]+  {:<24}{}", jobs[i].id, "Done", cmd);
                         }
 
                         let mut i = jobs.len();
