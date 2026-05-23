@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,7 +12,7 @@ use std::os::unix::process::CommandExt;
 
 fn main() {
     loop {
-        // Shell prompt
+        // Prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
@@ -22,7 +22,6 @@ fn main() {
 
         let input = input.trim();
 
-        // Ignore empty input
         if input.is_empty() {
             continue;
         }
@@ -34,9 +33,11 @@ fn main() {
             continue;
         }
 
-        // Redirection targets
-        let mut stdout_redirect: Option<String> = None;
-        let mut stderr_redirect: Option<String> = None;
+        // stdout redirection
+        let mut stdout_redirect: Option<(String, bool)> = None;
+
+        // stderr redirection
+        let mut stderr_redirect: Option<(String, bool)> = None;
 
         let mut cleaned_parts = Vec::new();
 
@@ -46,7 +47,17 @@ fn main() {
             match parts[i].as_str() {
                 ">" | "1>" => {
                     if i + 1 < parts.len() {
-                        stdout_redirect = Some(parts[i + 1].clone());
+                        stdout_redirect = Some((parts[i + 1].clone(), false));
+
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                ">>" | "1>>" => {
+                    if i + 1 < parts.len() {
+                        stdout_redirect = Some((parts[i + 1].clone(), true));
 
                         i += 2;
                     } else {
@@ -56,7 +67,17 @@ fn main() {
 
                 "2>" => {
                     if i + 1 < parts.len() {
-                        stderr_redirect = Some(parts[i + 1].clone());
+                        stderr_redirect = Some((parts[i + 1].clone(), false));
+
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                "2>>" => {
+                    if i + 1 < parts.len() {
+                        stderr_redirect = Some((parts[i + 1].clone(), true));
 
                         i += 2;
                     } else {
@@ -91,12 +112,12 @@ fn main() {
                 let output = format!("{}\n", args.join(" "));
 
                 // Create stderr file even if unused
-                if let Some(file_path) = &stderr_redirect {
-                    File::create(file_path).unwrap();
+                if let Some((file_path, append)) = &stderr_redirect {
+                    open_file(file_path, *append);
                 }
 
-                if let Some(file_path) = stdout_redirect {
-                    let mut file = File::create(file_path).unwrap();
+                if let Some((file_path, append)) = stdout_redirect {
+                    let mut file = open_file(&file_path, append);
 
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
@@ -115,12 +136,12 @@ fn main() {
                 };
 
                 // Create stderr file even if unused
-                if let Some(file_path) = &stderr_redirect {
-                    File::create(file_path).unwrap();
+                if let Some((file_path, append)) = &stderr_redirect {
+                    open_file(file_path, *append);
                 }
 
-                if let Some(file_path) = stdout_redirect {
-                    let mut file = File::create(file_path).unwrap();
+                if let Some((file_path, append)) = stdout_redirect {
+                    let mut file = open_file(&file_path, append);
 
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
@@ -147,8 +168,8 @@ fn main() {
                 if result.is_err() {
                     let error_output = format!("cd: {}: No such file or directory\n", args[0]);
 
-                    if let Some(file_path) = stderr_redirect {
-                        let mut file = File::create(file_path).unwrap();
+                    if let Some((file_path, append)) = stderr_redirect {
+                        let mut file = open_file(&file_path, append);
 
                         file.write_all(error_output.as_bytes()).unwrap();
                     } else {
@@ -156,8 +177,8 @@ fn main() {
                     }
                 } else {
                     // Create stderr file if unused
-                    if let Some(file_path) = stderr_redirect {
-                        File::create(file_path).unwrap();
+                    if let Some((file_path, append)) = stderr_redirect {
+                        open_file(&file_path, append);
                     }
                 }
             }
@@ -167,8 +188,8 @@ fn main() {
                 if args.is_empty() {
                     let error_output = "type: missing argument\n";
 
-                    if let Some(file_path) = stderr_redirect {
-                        let mut file = File::create(file_path).unwrap();
+                    if let Some((file_path, append)) = stderr_redirect {
+                        let mut file = open_file(&file_path, append);
 
                         file.write_all(error_output.as_bytes()).unwrap();
                     } else {
@@ -197,12 +218,12 @@ fn main() {
                 };
 
                 // Create stderr file even if unused
-                if let Some(file_path) = &stderr_redirect {
-                    File::create(file_path).unwrap();
+                if let Some((file_path, append)) = &stderr_redirect {
+                    open_file(file_path, *append);
                 }
 
-                if let Some(file_path) = stdout_redirect {
-                    let mut file = File::create(file_path).unwrap();
+                if let Some((file_path, append)) = stdout_redirect {
+                    let mut file = open_file(&file_path, append);
 
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
@@ -224,15 +245,15 @@ fn main() {
                         cmd.args(args);
 
                         // Redirect stdout
-                        if let Some(file_path) = stdout_redirect {
-                            let file = File::create(file_path).unwrap();
+                        if let Some((file_path, append)) = stdout_redirect {
+                            let file = open_file(&file_path, append);
 
                             cmd.stdout(Stdio::from(file));
                         }
 
                         // Redirect stderr
-                        if let Some(file_path) = stderr_redirect {
-                            let file = File::create(file_path).unwrap();
+                        if let Some((file_path, append)) = stderr_redirect {
+                            let file = open_file(&file_path, append);
 
                             cmd.stderr(Stdio::from(file));
                         }
@@ -257,6 +278,17 @@ fn main() {
             }
         }
     }
+}
+
+// Open file for overwrite or append
+fn open_file(path: &str, append: bool) -> File {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(path)
+        .unwrap()
 }
 
 // Parse shell input
@@ -298,6 +330,45 @@ fn parse_input(input: &str) -> Vec<String> {
 
         // Redirection operators outside quotes
         if !in_single_quotes && !in_double_quotes {
+            // 2>>
+            if ch == '2' && i + 2 < chars.len() && chars[i + 1] == '>' && chars[i + 2] == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push("2>>".to_string());
+
+                i += 3;
+                continue;
+            }
+
+            // 1>>
+            if ch == '1' && i + 2 < chars.len() && chars[i + 1] == '>' && chars[i + 2] == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push("1>>".to_string());
+
+                i += 3;
+                continue;
+            }
+
+            // >>
+            if ch == '>' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push(">>".to_string());
+
+                i += 2;
+                continue;
+            }
+
             // 2>
             if ch == '2' && i + 1 < chars.len() && chars[i + 1] == '>' {
                 if !current.is_empty() {
