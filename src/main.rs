@@ -392,11 +392,17 @@ fn main() {
                     }
 
                     // ======================
-                    // ECHO
+                    // ECHO BUILTIN
                     // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
+                        // CREATE stderr redirect file even if unused
+                        if let Some((file_path, append)) = &stderr_redirect {
+                            let _ = open_file(file_path, *append);
+                        }
+
+                        // stdout redirect
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
