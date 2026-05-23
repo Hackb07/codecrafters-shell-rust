@@ -27,7 +27,7 @@ fn main() {
             continue;
         }
 
-        // Parse command line with single quote support
+        // Parse command line
         let parts = parse_input(input);
 
         if parts.is_empty() {
@@ -150,11 +150,13 @@ fn main() {
     }
 }
 
-// Parse input with single quote support
+// Parse shell input with single + double quotes
 fn parse_input(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
+
     let mut in_single_quotes = false;
+    let mut in_double_quotes = false;
 
     let chars: Vec<char> = input.chars().collect();
 
@@ -164,17 +166,25 @@ fn parse_input(input: &str) -> Vec<String> {
         let ch = chars[i];
 
         match ch {
-            '\'' => {
+            // Single quote
+            '\'' if !in_double_quotes => {
                 in_single_quotes = !in_single_quotes;
             }
 
-            ' ' | '\t' if !in_single_quotes => {
+            // Double quote
+            '"' if !in_single_quotes => {
+                in_double_quotes = !in_double_quotes;
+            }
+
+            // Split only outside quotes
+            ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
                     current.clear();
                 }
             }
 
+            // Normal characters
             _ => {
                 current.push(ch);
             }
@@ -183,6 +193,7 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
+    // Push final argument
     if !current.is_empty() {
         args.push(current);
     }
@@ -205,7 +216,7 @@ fn find_executable(command: &str) -> Option<PathBuf> {
     None
 }
 
-// Check execute permissions
+// Check executable permissions
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
