@@ -16,7 +16,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read input
+        // Read user input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
@@ -27,24 +27,51 @@ fn main() {
             continue;
         }
 
-        // Parse shell input
+        // Parse input
         let mut parts = parse_input(input);
 
         if parts.is_empty() {
             continue;
         }
 
-        // Output redirection
-        let mut redirect_file: Option<String> = None;
+        // Redirection handling
+        let mut stdout_redirect: Option<String> = None;
+        let mut stderr_redirect: Option<String> = None;
 
-        if let Some(pos) = parts.iter().position(|x| x == ">" || x == "1>") {
-            if pos + 1 < parts.len() {
-                redirect_file = Some(parts[pos + 1].clone());
+        let mut cleaned_parts = Vec::new();
 
-                // Remove redirection tokens
-                parts.truncate(pos);
+        let mut i = 0;
+
+        while i < parts.len() {
+            match parts[i].as_str() {
+                ">" | "1>" => {
+                    if i + 1 < parts.len() {
+                        stdout_redirect = Some(parts[i + 1].clone());
+
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                "2>" => {
+                    if i + 1 < parts.len() {
+                        stderr_redirect = Some(parts[i + 1].clone());
+
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                _ => {
+                    cleaned_parts.push(parts[i].clone());
+                    i += 1;
+                }
             }
         }
+
+        parts = cleaned_parts;
 
         if parts.is_empty() {
             continue;
@@ -54,39 +81,44 @@ fn main() {
         let args = &parts[1..];
 
         match command.as_str() {
-            // Builtin: exit
+            // exit
             "exit" => {
                 break;
             }
 
-            // Builtin: echo
+            // echo
             "echo" => {
                 let output = format!("{}\n", args.join(" "));
 
-                if let Some(file_path) = redirect_file {
+                if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
+
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
                     print!("{}", output);
                 }
             }
 
-            // Builtin: pwd
+            // pwd
             "pwd" => {
                 let output = match env::current_dir() {
-                    Ok(path) => format!("{}\n", path.display()),
+                    Ok(path) => {
+                        format!("{}\n", path.display())
+                    }
+
                     Err(_) => "pwd: unable to get current directory\n".to_string(),
                 };
 
-                if let Some(file_path) = redirect_file {
+                if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
+
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
                     print!("{}", output);
                 }
             }
 
-            // Builtin: cd
+            // cd
             "cd" => {
                 if args.is_empty() {
                     continue;
@@ -100,19 +132,34 @@ fn main() {
 
                 let path = Path::new(&target_dir);
 
-                match env::set_current_dir(path) {
-                    Ok(_) => {}
+                let result = env::set_current_dir(path);
 
-                    Err(_) => {
-                        println!("cd: {}: No such file or directory", args[0]);
+                if result.is_err() {
+                    let error_output = format!("cd: {}: No such file or directory\n", args[0]);
+
+                    if let Some(file_path) = stderr_redirect {
+                        let mut file = File::create(file_path).unwrap();
+
+                        file.write_all(error_output.as_bytes()).unwrap();
+                    } else {
+                        eprint!("{}", error_output);
                     }
                 }
             }
 
-            // Builtin: type
+            // type
             "type" => {
                 if args.is_empty() {
-                    println!("type: missing argument");
+                    let error_output = "type: missing argument\n";
+
+                    if let Some(file_path) = stderr_redirect {
+                        let mut file = File::create(file_path).unwrap();
+
+                        file.write_all(error_output.as_bytes()).unwrap();
+                    } else {
+                        eprint!("{}", error_output);
+                    }
+
                     continue;
                 }
 
@@ -134,8 +181,9 @@ fn main() {
                     },
                 };
 
-                if let Some(file_path) = redirect_file {
+                if let Some(file_path) = stdout_redirect {
                     let mut file = File::create(file_path).unwrap();
+
                     file.write_all(output.as_bytes()).unwrap();
                 } else {
                     print!("{}", output);
@@ -146,61 +194,44 @@ fn main() {
             _ => {
                 match find_executable(command) {
                     Some(path) => {
+                        let mut cmd = Command::new(&path);
+
                         #[cfg(unix)]
                         {
-                            let mut cmd = Command::new(&path);
-
                             cmd.arg0(command);
-                            cmd.args(args);
-
-                            // Redirect stdout only
-                            if let Some(file_path) = redirect_file {
-                                let file = File::create(file_path).unwrap();
-
-                                cmd.stdout(Stdio::from(file));
-                            }
-
-                            let result = cmd.spawn();
-
-                            match result {
-                                Ok(mut child) => {
-                                    child.wait().unwrap();
-                                }
-
-                                Err(_) => {
-                                    println!("{}: command not found", command);
-                                }
-                            }
                         }
 
-                        #[cfg(windows)]
-                        {
-                            let mut cmd = Command::new(&path);
+                        cmd.args(args);
 
-                            cmd.args(args);
+                        // Redirect stdout
+                        if let Some(file_path) = stdout_redirect {
+                            let file = File::create(file_path).unwrap();
 
-                            if let Some(file_path) = redirect_file {
-                                let file = File::create(file_path).unwrap();
+                            cmd.stdout(Stdio::from(file));
+                        }
 
-                                cmd.stdout(Stdio::from(file));
+                        // Redirect stderr
+                        if let Some(file_path) = stderr_redirect {
+                            let file = File::create(file_path).unwrap();
+
+                            cmd.stderr(Stdio::from(file));
+                        }
+
+                        let result = cmd.spawn();
+
+                        match result {
+                            Ok(mut child) => {
+                                child.wait().unwrap();
                             }
 
-                            let result = cmd.spawn();
-
-                            match result {
-                                Ok(mut child) => {
-                                    child.wait().unwrap();
-                                }
-
-                                Err(_) => {
-                                    println!("{}: command not found", command);
-                                }
+                            Err(_) => {
+                                eprintln!("{}: command not found", command);
                             }
                         }
                     }
 
                     None => {
-                        println!("{}: command not found", command);
+                        eprintln!("{}: command not found", command);
                     }
                 }
             }
@@ -245,6 +276,48 @@ fn parse_input(input: &str) -> Vec<String> {
             }
         }
 
+        // Redirection operators outside quotes
+        if !in_single_quotes && !in_double_quotes {
+            // 2>
+            if ch == '2' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push("2>".to_string());
+
+                i += 2;
+                continue;
+            }
+
+            // 1>
+            if ch == '1' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push("1>".to_string());
+
+                i += 2;
+                continue;
+            }
+
+            // >
+            if ch == '>' {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+
+                args.push(">".to_string());
+
+                i += 1;
+                continue;
+            }
+        }
+
         match ch {
             // Backslash outside quotes
             '\\' if !in_single_quotes && !in_double_quotes => {
@@ -282,6 +355,7 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
+    // Push final argument
     if !current.is_empty() {
         args.push(current);
     }
