@@ -13,6 +13,12 @@ fn main() {
         if command == "exit" {
             break;
         }
-        println!("{:?}", command);
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if !parts.is_empty() && parts[0] == "echo" {
+            let args = parts[1..].join(" ");
+            println!("{}", args);
+        } else {
+            println!("{}: command not found", command);
+        }
     }
 }
