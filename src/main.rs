@@ -29,7 +29,7 @@ use std::os::unix::process::CommandExt;
 const BUILTINS: [&str; 6] = ["echo", "exit", "pwd", "cd", "type", "complete"];
 
 // ======================
-// TAB COMPLETER
+// COMPLETER
 // ======================
 
 struct ShellCompleter {
@@ -106,7 +106,7 @@ impl Completer for ShellCompleter {
                         candidates.sort();
 
                         // ======================
-                        // SINGLE CANDIDATE
+                        // SINGLE MATCH
                         // ======================
 
                         if candidates.len() == 1 {
@@ -117,7 +117,7 @@ impl Completer for ShellCompleter {
                             return Ok((
                                 0,
                                 vec![Pair {
-                                    display: candidate.to_string(),
+                                    display: candidate.clone(),
 
                                     replacement,
                                 }],
@@ -125,7 +125,28 @@ impl Completer for ShellCompleter {
                         }
 
                         // ======================
-                        // MULTIPLE CANDIDATES
+                        // LONGEST COMMON PREFIX
+                        // ======================
+
+                        if !candidates.is_empty() {
+                            let lcp = longest_common_prefix(&candidates);
+
+                            if lcp.len() > current_arg.len() {
+                                let replacement = format!("{}{}", &input[..last_space], lcp);
+
+                                return Ok((
+                                    0,
+                                    vec![Pair {
+                                        display: lcp.clone(),
+
+                                        replacement,
+                                    }],
+                                ));
+                            }
+                        }
+
+                        // ======================
+                        // MULTIPLE MATCHES
                         // ======================
 
                         if candidates.len() > 1 {
@@ -169,14 +190,17 @@ impl Completer for ShellCompleter {
         }
 
         // ======================
-        // NORMAL COMPLETION
+        // NORMAL FILE/COMMAND COMPLETION
         // ======================
 
         let mut matches: Vec<(String, bool)> = Vec::new();
 
         let is_command_position = !input.contains(' ');
 
-        // BUILTINS + EXECUTABLES
+        // ======================
+        // BUILTIN + EXECUTABLES
+        // ======================
+
         if is_command_position {
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
@@ -193,14 +217,12 @@ impl Completer for ShellCompleter {
 
                 let entries = match fs::read_dir(&dir) {
                     Ok(e) => e,
-
                     Err(_) => continue,
                 };
 
                 for entry in entries {
                     let entry = match entry {
                         Ok(e) => e,
-
                         Err(_) => continue,
                     };
 
@@ -219,7 +241,10 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // FILE/DIR COMPLETION
+        // ======================
+        // FILE / DIR COMPLETION
+        // ======================
+
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
             (&current_arg[..idx + 1], &current_arg[idx + 1..])
         } else {
@@ -236,7 +261,6 @@ impl Completer for ShellCompleter {
             for entry in entries {
                 let entry = match entry {
                     Ok(e) => e,
-
                     Err(_) => continue,
                 };
 
@@ -258,7 +282,10 @@ impl Completer for ShellCompleter {
 
         matches.dedup_by(|a, b| a.0 == b.0);
 
+        // ======================
         // NO MATCH
+        // ======================
+
         if matches.is_empty() {
             print!("\x07");
 
@@ -267,7 +294,10 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
+        // ======================
         // SINGLE MATCH
+        // ======================
+
         if matches.len() == 1 {
             let (completion, is_dir) = matches[0].clone();
 
@@ -287,7 +317,30 @@ impl Completer for ShellCompleter {
             ));
         }
 
+        // ======================
+        // LONGEST COMMON PREFIX
+        // ======================
+
+        let names: Vec<String> = matches.iter().map(|m| m.0.clone()).collect();
+
+        let lcp = longest_common_prefix(&names);
+
+        if lcp.len() > current_arg.len() {
+            let replacement = format!("{}{}", &input[..last_space], lcp);
+
+            return Ok((
+                0,
+                vec![Pair {
+                    display: lcp.clone(),
+                    replacement,
+                }],
+            ));
+        }
+
+        // ======================
         // MULTIPLE MATCHES
+        // ======================
+
         let mut last_input = self.last_input.borrow_mut();
 
         let mut tab_count = self.tab_count.borrow_mut();
@@ -369,7 +422,7 @@ fn main() {
                     continue;
                 }
 
-                let mut parts = parse_input(input);
+                let parts = parse_input(input);
 
                 if parts.is_empty() {
                     continue;
@@ -524,29 +577,6 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
-        if ch == '\\' && in_double_quotes {
-            if i + 1 < chars.len() {
-                let next = chars[i + 1];
-
-                match next {
-                    '"' | '\\' => {
-                        current.push(next);
-
-                        i += 2;
-                        continue;
-                    }
-
-                    _ => {
-                        current.push('\\');
-                        current.push(next);
-
-                        i += 2;
-                        continue;
-                    }
-                }
-            }
-        }
-
         match ch {
             '\\' if !in_single_quotes && !in_double_quotes => {
                 i += 1;
@@ -585,6 +615,30 @@ fn parse_input(input: &str) -> Vec<String> {
     }
 
     args
+}
+
+// ======================
+// LONGEST COMMON PREFIX
+// ======================
+
+fn longest_common_prefix(strings: &[String]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+
+    let mut prefix = strings[0].clone();
+
+    for s in strings.iter().skip(1) {
+        while !s.starts_with(&prefix) {
+            prefix.pop();
+
+            if prefix.is_empty() {
+                break;
+            }
+        }
+    }
+
+    prefix
 }
 
 // ======================
