@@ -141,7 +141,7 @@ impl Completer for ShellCompleter {
                             ));
                         }
 
-                        // LONGEST COMMON PREFIX
+                        // LCP
                         let lcp = longest_common_prefix(&candidates);
 
                         if lcp.len() > current_arg.len() {
@@ -312,7 +312,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // LONGEST COMMON PREFIX
+        // LCP
         let names: Vec<String> = matches.iter().map(|m| m.0.clone()).collect();
 
         let lcp = longest_common_prefix(&names);
@@ -419,6 +419,10 @@ fn main() {
                     continue;
                 }
 
+                // ======================
+                // BACKGROUND
+                // ======================
+
                 let mut background = false;
 
                 if let Some(last) = parts.last() {
@@ -427,6 +431,10 @@ fn main() {
                         parts.pop();
                     }
                 }
+
+                // ======================
+                // REDIRECTION
+                // ======================
 
                 let mut stdout_redirect: Option<(String, bool)> = None;
 
@@ -496,19 +504,35 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    "jobs" => {}
+                    // ======================
+                    // JOBS
+                    // ======================
+                    "jobs" => {
+                        for job in jobs.iter_mut() {
+                            match job.child.try_wait() {
+                                Ok(None) => {
+                                    println!("[{}]+  {:<24}{}", job.id, "Running", job.command);
+                                }
 
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        // IMPORTANT:
-                        // create stderr redirect file even if echo
-                        // doesn't write stderr
-
+                        // IMPORTANT FIX
                         if let Some((stderr_path, append)) = &stderr_redirect {
                             let _ = open_file(stderr_path, *append);
                         }
@@ -522,10 +546,16 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
                         println!("{}", env::current_dir().unwrap().display());
                     }
 
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -542,6 +572,9 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -564,8 +597,10 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // COMPLETE
+                    // ======================
                     "complete" => {
-                        // REGISTER
                         if args.len() >= 3 && args[0] == "-C" {
                             let script = args[1].clone();
 
@@ -574,17 +609,13 @@ fn main() {
                             if let Some(helper) = rl.helper_mut() {
                                 helper.completions.borrow_mut().insert(cmd, script);
                             }
-                        }
-                        // REMOVE
-                        else if args.len() >= 2 && args[0] == "-r" {
+                        } else if args.len() >= 2 && args[0] == "-r" {
                             let cmd = &args[1];
 
                             if let Some(helper) = rl.helper_mut() {
                                 helper.completions.borrow_mut().remove(cmd);
                             }
-                        }
-                        // PRINT
-                        else if args.len() >= 2 && args[0] == "-p" {
+                        } else if args.len() >= 2 && args[0] == "-p" {
                             let cmd = &args[1];
 
                             if let Some(helper) = rl.helper_mut() {
@@ -603,59 +634,67 @@ fn main() {
                         }
                     }
 
-                    _ => match find_executable(command) {
-                        Some(path) => {
-                            let mut cmd = Command::new(&path);
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
+                    _ => {
+                        match find_executable(command) {
+                            Some(path) => {
+                                let mut cmd = Command::new(&path);
 
-                            #[cfg(unix)]
-                            {
-                                cmd.arg0(command);
-                            }
+                                #[cfg(unix)]
+                                {
+                                    cmd.arg0(command);
+                                }
 
-                            cmd.args(args);
+                                cmd.args(args);
 
-                            if let Some((file_path, append)) = stdout_redirect {
-                                let file = open_file(&file_path, append);
+                                if let Some((file_path, append)) = stdout_redirect {
+                                    let file = open_file(&file_path, append);
 
-                                cmd.stdout(Stdio::from(file));
-                            }
+                                    cmd.stdout(Stdio::from(file));
+                                }
 
-                            if let Some((file_path, append)) = stderr_redirect {
-                                let file = open_file(&file_path, append);
+                                if let Some((file_path, append)) = stderr_redirect {
+                                    let file = open_file(&file_path, append);
 
-                                cmd.stderr(Stdio::from(file));
-                            }
+                                    cmd.stderr(Stdio::from(file));
+                                }
 
-                            match cmd.spawn() {
-                                Ok(mut child) => {
-                                    if background {
-                                        let job_id = jobs.len() + 1;
+                                match cmd.spawn() {
+                                    Ok(mut child) => {
+                                        // BACKGROUND
+                                        if background {
+                                            let job_id = jobs.len() + 1;
 
-                                        let pid = child.id();
+                                            let pid = child.id();
 
-                                        println!("[{}] {}", job_id, pid);
+                                            println!("[{}] {}", job_id, pid);
 
-                                        jobs.push(Job {
-                                            id: job_id,
-                                            pid,
-                                            command: input.to_string(),
-                                            child,
-                                        });
-                                    } else {
-                                        child.wait().unwrap();
+                                            jobs.push(Job {
+                                                id: job_id,
+                                                pid,
+                                                command: format!("{} &", input),
+                                                child,
+                                            });
+                                        }
+                                        // FOREGROUND
+                                        else {
+                                            child.wait().unwrap();
+                                        }
+                                    }
+
+                                    Err(_) => {
+                                        eprintln!("{}: command not found", command);
                                     }
                                 }
+                            }
 
-                                Err(_) => {
-                                    eprintln!("{}: command not found", command);
-                                }
+                            None => {
+                                eprintln!("{}: command not found", command);
                             }
                         }
-
-                        None => {
-                            eprintln!("{}: command not found", command);
-                        }
-                    },
+                    }
                 }
             }
 
