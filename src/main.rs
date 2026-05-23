@@ -539,6 +539,27 @@ fn main() {
                             };
                             println!("[{}]{}  {:<24}{}", jobs[idx].id, marker, "Running", jobs[idx].command);
                         }
+
+                        for (i, &is_running) in running.iter().enumerate() {
+                            if is_running {
+                                continue;
+                            }
+                            let cmd = jobs[i]
+                                .command
+                                .trim_end()
+                                .trim_end_matches('&')
+                                .trim_end()
+                                .to_string();
+                            println!("[{}]+  {:<24}{}", jobs[i].id, "Done", cmd);
+                        }
+
+                        let mut i = jobs.len();
+                        while i > 0 {
+                            i -= 1;
+                            if !running[i] {
+                                jobs.remove(i);
+                            }
+                        }
                     }
 
                     // ======================
