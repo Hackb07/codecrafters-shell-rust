@@ -1,34 +1,52 @@
-use std::env::args;
-#[allow(unused_imports)]
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
 fn main() {
-    // TODO: Uncomment the code below to pass the first stage
     loop {
+        // Print shell prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
+        // Read user input
         let mut command = String::new();
         io::stdin().read_line(&mut command).unwrap();
-        command = command.trim().to_string();
-        if command == "exit" {
-            break;
+
+        let command = command.trim();
+
+        // Skip empty input
+        if command.is_empty() {
+            continue;
         }
+
+        // Split command into parts
         let parts: Vec<&str> = command.split_whitespace().collect();
-        if !parts.is_empty() && parts[0] == "type" {
-            if !parts.is_empty() && parts[0] == "echo" {
+
+        match parts[0] {
+            "exit" => {
+                break;
+            }
+
+            "echo" => {
                 let args = parts[1..].join(" ");
                 println!("{}", args);
-            } else if !parts.is_empty() && parts[0] == "type" {
-                println!("type is a shell builtin");
-            } else if !parts.is_empty() && parts[0] == "exit" {
-                println!("exit is a shell builtin");
-            } else {
-                println!("{:?}: not found", args);
             }
-        }
-        {
-            println!("{}: command not found", command);
+
+            "type" => {
+                if parts.len() < 2 {
+                    println!("type: missing argument");
+                    continue;
+                }
+
+                match parts[1] {
+                    "echo" => println!("echo is a shell builtin"),
+                    "exit" => println!("exit is a shell builtin"),
+                    "type" => println!("type is a shell builtin"),
+                    _ => println!("{}: not found", parts[1]),
+                }
+            }
+
+            _ => {
+                println!("{}: command not found", command);
+            }
         }
     }
 }
