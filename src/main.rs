@@ -14,10 +14,19 @@ fn main() {
             break;
         }
         let parts: Vec<&str> = command.split_whitespace().collect();
-        if !parts.is_empty() && parts[0] == "echo" {
-            let args = parts[1..].join(" ");
-            println!("{}", args);
-        } else {
+        if !parts.is_empty() && parts[0] == "type" {
+            if !parts.is_empty() && parts[0] == "echo" {
+                let args = parts[1..].join(" ");
+                println!("{}", args);
+            } else if !parts.is_empty() && parts[0] == "type" {
+                println!("type is a shell builtin");
+            } else if !parts.is_empty() && parts[0] == "exit" {
+                println!("exit is a shell builtin");
+            } else {
+                println!("{:?}: not found", args);
+            }
+        }
+        {
             println!("{}: command not found", command);
         }
     }
