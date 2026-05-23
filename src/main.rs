@@ -2,7 +2,7 @@ use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
-use rustyline::history::{DefaultHistory, History};
+use rustyline::history::{DefaultHistory, History, SearchDirection};
 use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
@@ -1091,8 +1091,8 @@ fn main() {
                     // ======================
                     "history" => {
                         for i in 0..rl.history().len() {
-                            if let Some(entry) = rl.history().get(i) {
-                                println!("{:>5}  {}", i + 1, entry);
+                            if let Ok(Some(entry)) = rl.history().get(i, SearchDirection::Reverse) {
+                                println!("{:>5}  {}", i + 1, entry.line);
                             }
                         }
                     }
