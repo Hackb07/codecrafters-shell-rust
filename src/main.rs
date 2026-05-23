@@ -1,5 +1,3 @@
-// src/main.rs
-
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -10,9 +8,24 @@ use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
 };
 
+use std::env;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
+// ======================
+// TAB COMPLETION
+// ======================
+
 struct ShellCompleter;
 
-// Required trait impls
 impl Helper for ShellCompleter {}
 
 impl Hinter for ShellCompleter {
@@ -23,7 +36,6 @@ impl Highlighter for ShellCompleter {}
 
 impl Validator for ShellCompleter {}
 
-// TAB completion
 impl Completer for ShellCompleter {
     type Candidate = Pair;
 
@@ -42,8 +54,6 @@ impl Completer for ShellCompleter {
             .filter(|cmd| cmd.starts_with(input))
             .map(|cmd| Pair {
                 display: cmd.to_string(),
-
-                // Replace fully with trailing space
                 replacement: format!("{} ", cmd),
             })
             .collect();
@@ -52,8 +62,12 @@ impl Completer for ShellCompleter {
     }
 }
 
+// ======================
+// MAIN
+// ======================
+
 fn main() {
-    // Configure rustyline
+    // Rustyline config
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
@@ -62,7 +76,6 @@ fn main() {
 
     rl.set_helper(Some(ShellCompleter));
 
-    // Force TAB completion
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
 
     loop {
@@ -72,14 +85,219 @@ fn main() {
             Ok(line) => {
                 let input = line.trim();
 
-                // exit
-                if input == "exit" {
-                    break;
+                if input.is_empty() {
+                    continue;
                 }
 
-                // echo
-                if input.starts_with("echo ") {
-                    println!("{}", &input[5..]);
+                let mut parts = parse_input(input);
+
+                if parts.is_empty() {
+                    continue;
+                }
+
+                // stdout redirect
+                let mut stdout_redirect: Option<(String, bool)> = None;
+
+                // stderr redirect
+                let mut stderr_redirect: Option<(String, bool)> = None;
+
+                let mut cleaned_parts = Vec::new();
+
+                let mut i = 0;
+
+                while i < parts.len() {
+                    match parts[i].as_str() {
+                        ">" | "1>" => {
+                            if i + 1 < parts.len() {
+                                stdout_redirect = Some((parts[i + 1].clone(), false));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        ">>" | "1>>" => {
+                            if i + 1 < parts.len() {
+                                stdout_redirect = Some((parts[i + 1].clone(), true));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        "2>" => {
+                            if i + 1 < parts.len() {
+                                stderr_redirect = Some((parts[i + 1].clone(), false));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        "2>>" => {
+                            if i + 1 < parts.len() {
+                                stderr_redirect = Some((parts[i + 1].clone(), true));
+
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+
+                        _ => {
+                            cleaned_parts.push(parts[i].clone());
+
+                            i += 1;
+                        }
+                    }
+                }
+
+                parts = cleaned_parts;
+
+                if parts.is_empty() {
+                    continue;
+                }
+
+                let command = &parts[0];
+                let args = &parts[1..];
+
+                match command.as_str() {
+                    // exit
+                    "exit" => {
+                        break;
+                    }
+
+                    // echo
+                    "echo" => {
+                        let output = format!("{}\n", args.join(" "));
+
+                        if let Some((file_path, append)) = stdout_redirect {
+                            let mut file = open_file(&file_path, append);
+
+                            file.write_all(output.as_bytes()).unwrap();
+                        } else {
+                            print!("{}", output);
+                        }
+                    }
+
+                    // pwd
+                    "pwd" => {
+                        let output = match env::current_dir() {
+                            Ok(path) => format!("{}\n", path.display()),
+
+                            Err(_) => "pwd: unable to get current directory\n".to_string(),
+                        };
+
+                        if let Some((file_path, append)) = stdout_redirect {
+                            let mut file = open_file(&file_path, append);
+
+                            file.write_all(output.as_bytes()).unwrap();
+                        } else {
+                            print!("{}", output);
+                        }
+                    }
+
+                    // cd
+                    "cd" => {
+                        if args.is_empty() {
+                            continue;
+                        }
+
+                        let target_dir = if args[0] == "~" {
+                            env::var("HOME").unwrap_or_default()
+                        } else {
+                            args[0].clone()
+                        };
+
+                        let path = Path::new(&target_dir);
+
+                        if let Err(_) = env::set_current_dir(path) {
+                            let error_output =
+                                format!("cd: {}: No such file or directory\n", args[0]);
+
+                            if let Some((file_path, append)) = stderr_redirect {
+                                let mut file = open_file(&file_path, append);
+
+                                file.write_all(error_output.as_bytes()).unwrap();
+                            } else {
+                                eprint!("{}", error_output);
+                            }
+                        }
+                    }
+
+                    // type
+                    "type" => {
+                        if args.is_empty() {
+                            eprintln!("type: missing argument");
+
+                            continue;
+                        }
+
+                        let cmd = &args[0];
+
+                        match cmd.as_str() {
+                            "echo" | "exit" | "pwd" | "cd" | "type" => {
+                                println!("{} is a shell builtin", cmd);
+                            }
+
+                            _ => match find_executable(cmd) {
+                                Some(path) => {
+                                    println!("{} is {}", cmd, path.display());
+                                }
+
+                                None => {
+                                    println!("{}: not found", cmd);
+                                }
+                            },
+                        }
+                    }
+
+                    // external commands
+                    _ => {
+                        match find_executable(command) {
+                            Some(path) => {
+                                let mut cmd = Command::new(&path);
+
+                                #[cfg(unix)]
+                                {
+                                    cmd.arg0(command);
+                                }
+
+                                cmd.args(args);
+
+                                // stdout ONLY
+                                if let Some((file_path, append)) = stdout_redirect {
+                                    let file = open_file(&file_path, append);
+
+                                    cmd.stdout(Stdio::from(file));
+                                }
+
+                                // stderr ONLY
+                                if let Some((file_path, append)) = stderr_redirect {
+                                    let file = open_file(&file_path, append);
+
+                                    cmd.stderr(Stdio::from(file));
+                                }
+
+                                match cmd.spawn() {
+                                    Ok(mut child) => {
+                                        child.wait().unwrap();
+                                    }
+
+                                    Err(_) => {
+                                        eprintln!("{}: command not found", command);
+                                    }
+                                }
+                            }
+
+                            None => {
+                                eprintln!("{}: command not found", command);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -97,4 +315,172 @@ fn main() {
             }
         }
     }
+}
+
+// ======================
+// FILE OPEN
+// ======================
+
+fn open_file(path: &str, append: bool) -> File {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(path)
+        .unwrap()
+}
+
+// ======================
+// PARSER
+// ======================
+
+fn parse_input(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+
+    let mut current = String::new();
+
+    let mut in_single_quotes = false;
+    let mut in_double_quotes = false;
+
+    let chars: Vec<char> = input.chars().collect();
+
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        // Double quote escapes
+        if ch == '\\' && in_double_quotes {
+            if i + 1 < chars.len() {
+                let next = chars[i + 1];
+
+                match next {
+                    '"' | '\\' => {
+                        current.push(next);
+
+                        i += 2;
+                        continue;
+                    }
+
+                    _ => {
+                        current.push('\\');
+                        current.push(next);
+
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Redirect operators
+        if !in_single_quotes && !in_double_quotes {
+            let redirects = ["2>>", "1>>", ">>", "2>", "1>", ">"];
+
+            let remaining: String = chars[i..].iter().collect();
+
+            let mut matched = false;
+
+            for op in redirects {
+                if remaining.starts_with(op) {
+                    if !current.is_empty() {
+                        args.push(current.clone());
+
+                        current.clear();
+                    }
+
+                    args.push(op.to_string());
+
+                    i += op.len();
+
+                    matched = true;
+
+                    break;
+                }
+            }
+
+            if matched {
+                continue;
+            }
+        }
+
+        match ch {
+            '\\' if !in_single_quotes && !in_double_quotes => {
+                i += 1;
+
+                if i < chars.len() {
+                    current.push(chars[i]);
+                }
+            }
+
+            '\'' if !in_double_quotes => {
+                in_single_quotes = !in_single_quotes;
+            }
+
+            '"' if !in_single_quotes => {
+                in_double_quotes = !in_double_quotes;
+            }
+
+            ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+
+                    current.clear();
+                }
+            }
+
+            _ => {
+                current.push(ch);
+            }
+        }
+
+        i += 1;
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
+}
+
+// ======================
+// EXECUTABLE SEARCH
+// ======================
+
+fn find_executable(command: &str) -> Option<PathBuf> {
+    let path_env = env::var("PATH").unwrap_or_default();
+
+    for dir in env::split_paths(&path_env) {
+        let full_path = dir.join(command);
+
+        if full_path.is_file() && is_executable(&full_path) {
+            return Some(full_path);
+        }
+    }
+
+    None
+}
+
+// ======================
+// EXECUTABLE CHECK
+// ======================
+
+fn is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        if let Ok(metadata) = fs::metadata(path) {
+            let mode = metadata.permissions().mode();
+
+            return mode & 0o111 != 0;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        return path.is_file();
+    }
+
+    false
 }
