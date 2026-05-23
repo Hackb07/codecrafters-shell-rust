@@ -1,8 +1,8 @@
 use std::env;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -28,13 +28,28 @@ fn main() {
         }
 
         // Parse shell input
-        let parts = parse_input(input);
+        let mut parts = parse_input(input);
 
         if parts.is_empty() {
             continue;
         }
 
-        // Executable name can now be quoted
+        // Output redirection
+        let mut redirect_file: Option<String> = None;
+
+        if let Some(pos) = parts.iter().position(|x| x == ">" || x == "1>") {
+            if pos + 1 < parts.len() {
+                redirect_file = Some(parts[pos + 1].clone());
+
+                // Remove redirection tokens
+                parts.truncate(pos);
+            }
+        }
+
+        if parts.is_empty() {
+            continue;
+        }
+
         let command = &parts[0];
         let args = &parts[1..];
 
@@ -46,19 +61,30 @@ fn main() {
 
             // Builtin: echo
             "echo" => {
-                println!("{}", args.join(" "));
+                let output = format!("{}\n", args.join(" "));
+
+                if let Some(file_path) = redirect_file {
+                    let mut file = File::create(file_path).unwrap();
+                    file.write_all(output.as_bytes()).unwrap();
+                } else {
+                    print!("{}", output);
+                }
             }
 
             // Builtin: pwd
-            "pwd" => match env::current_dir() {
-                Ok(path) => {
-                    println!("{}", path.display());
-                }
+            "pwd" => {
+                let output = match env::current_dir() {
+                    Ok(path) => format!("{}\n", path.display()),
+                    Err(_) => "pwd: unable to get current directory\n".to_string(),
+                };
 
-                Err(_) => {
-                    println!("pwd: unable to get current directory");
+                if let Some(file_path) = redirect_file {
+                    let mut file = File::create(file_path).unwrap();
+                    file.write_all(output.as_bytes()).unwrap();
+                } else {
+                    print!("{}", output);
                 }
-            },
+            }
 
             // Builtin: cd
             "cd" => {
@@ -92,61 +118,92 @@ fn main() {
 
                 let cmd = &args[0];
 
-                match cmd.as_str() {
+                let output = match cmd.as_str() {
                     "echo" | "exit" | "type" | "pwd" | "cd" => {
-                        println!("{} is a shell builtin", cmd);
+                        format!("{} is a shell builtin\n", cmd)
                     }
 
                     _ => match find_executable(cmd) {
                         Some(path) => {
-                            println!("{} is {}", cmd, path.display());
+                            format!("{} is {}\n", cmd, path.display())
                         }
 
                         None => {
-                            println!("{}: not found", cmd);
+                            format!("{}: not found\n", cmd)
                         }
                     },
+                };
+
+                if let Some(file_path) = redirect_file {
+                    let mut file = File::create(file_path).unwrap();
+                    file.write_all(output.as_bytes()).unwrap();
+                } else {
+                    print!("{}", output);
                 }
             }
 
             // External commands
-            _ => match find_executable(command) {
-                Some(path) => {
-                    #[cfg(unix)]
-                    {
-                        let result = Command::new(&path).arg0(command).args(args).spawn();
+            _ => {
+                match find_executable(command) {
+                    Some(path) => {
+                        #[cfg(unix)]
+                        {
+                            let mut cmd = Command::new(&path);
 
-                        match result {
-                            Ok(mut child) => {
-                                child.wait().unwrap();
+                            cmd.arg0(command);
+                            cmd.args(args);
+
+                            // Redirect stdout only
+                            if let Some(file_path) = redirect_file {
+                                let file = File::create(file_path).unwrap();
+
+                                cmd.stdout(Stdio::from(file));
                             }
 
-                            Err(_) => {
-                                println!("{}: command not found", command);
+                            let result = cmd.spawn();
+
+                            match result {
+                                Ok(mut child) => {
+                                    child.wait().unwrap();
+                                }
+
+                                Err(_) => {
+                                    println!("{}: command not found", command);
+                                }
+                            }
+                        }
+
+                        #[cfg(windows)]
+                        {
+                            let mut cmd = Command::new(&path);
+
+                            cmd.args(args);
+
+                            if let Some(file_path) = redirect_file {
+                                let file = File::create(file_path).unwrap();
+
+                                cmd.stdout(Stdio::from(file));
+                            }
+
+                            let result = cmd.spawn();
+
+                            match result {
+                                Ok(mut child) => {
+                                    child.wait().unwrap();
+                                }
+
+                                Err(_) => {
+                                    println!("{}: command not found", command);
+                                }
                             }
                         }
                     }
 
-                    #[cfg(windows)]
-                    {
-                        let result = Command::new(&path).args(args).spawn();
-
-                        match result {
-                            Ok(mut child) => {
-                                child.wait().unwrap();
-                            }
-
-                            Err(_) => {
-                                println!("{}: command not found", command);
-                            }
-                        }
+                    None => {
+                        println!("{}: command not found", command);
                     }
                 }
-
-                None => {
-                    println!("{}: command not found", command);
-                }
-            },
+            }
         }
     }
 }
@@ -208,7 +265,7 @@ fn parse_input(input: &str) -> Vec<String> {
                 in_double_quotes = !in_double_quotes;
             }
 
-            // Split arguments outside quotes
+            // Split arguments
             ' ' | '\t' if !in_single_quotes && !in_double_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -225,7 +282,6 @@ fn parse_input(input: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Push final argument
     if !current.is_empty() {
         args.push(current);
     }
