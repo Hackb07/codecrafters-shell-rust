@@ -523,7 +523,7 @@ fn main() {
                         let running_indices: Vec<usize> = running
                             .iter()
                             .enumerate()
-                            .filter(|(_, &r)| r)
+                            .filter(|&(_, r)| *r)
                             .map(|(i, _)| i)
                             .collect();
 
