@@ -1,26 +1,26 @@
 use std::env;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
     loop {
-        // Shell prompt
+        // Display shell prompt
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read input
+        // Read user input
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
 
         let input = input.trim();
 
-        // Ignore empty lines
+        // Ignore empty input
         if input.is_empty() {
             continue;
         }
 
-        // Split command
+        // Split input into command + arguments
         let parts: Vec<&str> = input.split_whitespace().collect();
 
         let command = parts[0];
@@ -63,13 +63,19 @@ fn main() {
                 }
             }
 
-            // External command
+            // External programs
             _ => match find_executable(command) {
                 Some(path) => {
-                    let result = Command::new(path).args(args).status();
+                    let result = Command::new(path).args(args).spawn();
 
-                    if result.is_err() {
-                        println!("{}: command not found", command);
+                    match result {
+                        Ok(mut child) => {
+                            child.wait().unwrap();
+                        }
+
+                        Err(_) => {
+                            println!("{}: command not found", command);
+                        }
                     }
                 }
 
@@ -81,14 +87,16 @@ fn main() {
     }
 }
 
-// Find executable in PATH
+// Search executable in PATH
 fn find_executable(command: &str) -> Option<PathBuf> {
+    // Read PATH variable
     let path_env = env::var("PATH").unwrap_or_default();
 
+    // Iterate through PATH directories
     for dir in env::split_paths(&path_env) {
         let full_path = dir.join(command);
 
-        // Only check if file exists
+        // Check if executable exists
         if full_path.is_file() {
             return Some(full_path);
         }
