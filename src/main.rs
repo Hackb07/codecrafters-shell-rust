@@ -22,6 +22,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 
 // ======================
+// BUILTINS
+// ======================
+
+const BUILTINS: [&str; 6] = ["echo", "exit", "pwd", "cd", "type", "complete"];
+
+// ======================
 // TAB COMPLETION
 // ======================
 
@@ -49,29 +55,39 @@ impl Completer for ShellCompleter {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        let builtins = ["echo", "exit"];
-
         let input = &line[..pos];
+
+        // ======================
+        // CURRENT ARGUMENT
+        // ======================
 
         let last_space = input.rfind(' ').map(|i| i + 1).unwrap_or(0);
 
-        let prefix = &input[last_space..];
+        let current_arg = &input[last_space..];
 
         let mut matches: Vec<(String, bool)> = Vec::new();
 
         // ======================
-        // COMMAND COMPLETION
+        // COMMAND POSITION
         // ======================
 
-        if !input.contains(' ') {
-            // Builtins
-            for builtin in builtins {
-                if builtin.starts_with(prefix) {
+        let is_command_position = !input.contains(' ');
+
+        if is_command_position {
+            // ======================
+            // BUILTINS
+            // ======================
+
+            for builtin in BUILTINS {
+                if builtin.starts_with(current_arg) {
                     matches.push((builtin.to_string(), false));
                 }
             }
 
-            // PATH executables
+            // ======================
+            // EXECUTABLES
+            // ======================
+
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -80,7 +96,7 @@ impl Completer for ShellCompleter {
                 }
 
                 let entries = match fs::read_dir(&dir) {
-                    Ok(entries) => entries,
+                    Ok(e) => e,
 
                     Err(_) => continue,
                 };
@@ -98,37 +114,34 @@ impl Completer for ShellCompleter {
                         if let Some(name) = path.file_name() {
                             let name = name.to_string_lossy().to_string();
 
-                            if name.starts_with(prefix) {
+                            if name.starts_with(current_arg) {
                                 matches.push((name, false));
                             }
                         }
                     }
                 }
             }
+        }
+
+        // ======================
+        // FILE / DIRECTORY
+        // COMPLETION FOR
+        // ANY ARGUMENT
+        // ======================
+
+        let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
+            (&current_arg[..idx + 1], &current_arg[idx + 1..])
         } else {
-            // ======================
-            // FILE / DIRECTORY
-            // COMPLETION
-            // ======================
+            ("", current_arg)
+        };
 
-            let (search_dir, file_prefix) = if let Some(idx) = prefix.rfind('/') {
-                (&prefix[..idx + 1], &prefix[idx + 1..])
-            } else {
-                ("", prefix)
-            };
+        let dir_path = if search_dir.is_empty() {
+            PathBuf::from(".")
+        } else {
+            PathBuf::from(search_dir)
+        };
 
-            let dir_path = if search_dir.is_empty() {
-                PathBuf::from(".")
-            } else {
-                PathBuf::from(search_dir)
-            };
-
-            let entries = match fs::read_dir(&dir_path) {
-                Ok(entries) => entries,
-
-                Err(_) => return Ok((0, vec![])),
-            };
-
+        if let Ok(entries) = fs::read_dir(&dir_path) {
             for entry in entries {
                 let entry = match entry {
                     Ok(e) => e,
@@ -141,7 +154,7 @@ impl Completer for ShellCompleter {
                 if let Some(name) = path.file_name() {
                     let name = name.to_string_lossy().to_string();
 
-                    if name.starts_with(file_prefix) {
+                    if name.starts_with(prefix) {
                         let full_name = format!("{}{}", search_dir, name);
 
                         matches.push((full_name, path.is_dir()));
@@ -150,7 +163,10 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // Remove duplicates
+        // ======================
+        // SORT + DEDUP
+        // ======================
+
         matches.sort_by(|a, b| a.0.cmp(&b.0));
 
         matches.dedup_by(|a, b| a.0 == b.0);
@@ -174,18 +190,10 @@ impl Completer for ShellCompleter {
         if matches.len() == 1 {
             let (completion, is_dir) = matches[0].clone();
 
-            let replacement = if input.contains(' ') {
-                if is_dir {
-                    format!("{}{}/", &input[..last_space], completion)
-                } else {
-                    format!("{}{} ", &input[..last_space], completion)
-                }
+            let replacement = if is_dir {
+                format!("{}{}/", &input[..last_space], completion)
             } else {
-                if is_dir {
-                    format!("{}/", completion)
-                } else {
-                    format!("{} ", completion)
-                }
+                format!("{}{} ", &input[..last_space], completion)
             };
 
             return Ok((
@@ -206,12 +214,8 @@ impl Completer for ShellCompleter {
 
         let lcp = longest_common_prefix(&names);
 
-        if lcp.len() > prefix.len() {
-            let replacement = if input.contains(' ') {
-                format!("{}{}", &input[..last_space], lcp)
-            } else {
-                lcp.clone()
-            };
+        if lcp.len() > current_arg.len() {
+            let replacement = format!("{}{}", &input[..last_space], lcp);
 
             return Ok((
                 0,
@@ -235,10 +239,11 @@ impl Completer for ShellCompleter {
             *tab_count += 1;
         } else {
             *tab_count = 1;
+
             *last_input = input.to_string();
         }
 
-        // First TAB -> bell
+        // FIRST TAB -> BELL
         if *tab_count == 1 {
             print!("\x07");
 
@@ -247,7 +252,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // Second TAB -> list matches
+        // SECOND TAB -> SHOW LIST
         println!();
 
         let display_matches: Vec<String> = matches
@@ -379,17 +384,19 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
-                        if let Some((file_path, append)) = &stderr_redirect {
-                            let _ = open_file(file_path, *append);
-                        }
-
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
@@ -399,53 +406,35 @@ fn main() {
                         }
                     }
 
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
-                        let output = match env::current_dir() {
-                            Ok(path) => format!("{}\n", path.display()),
-
-                            Err(_) => "pwd: unable to get current directory\n".to_string(),
-                        };
-
-                        if let Some((file_path, append)) = &stderr_redirect {
-                            let _ = open_file(file_path, *append);
-                        }
-
-                        if let Some((file_path, append)) = stdout_redirect {
-                            let mut file = open_file(&file_path, append);
-
-                            file.write_all(output.as_bytes()).unwrap();
-                        } else {
-                            print!("{}", output);
-                        }
+                        println!("{}", env::current_dir().unwrap().display());
                     }
 
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
                         }
 
-                        let target_dir = if args[0] == "~" {
+                        let target = if args[0] == "~" {
                             env::var("HOME").unwrap_or_default()
                         } else {
                             args[0].clone()
                         };
 
-                        let path = Path::new(&target_dir);
-
-                        if let Err(_) = env::set_current_dir(path) {
-                            let error_output =
-                                format!("cd: {}: No such file or directory\n", args[0]);
-
-                            if let Some((file_path, append)) = stderr_redirect {
-                                let mut file = open_file(&file_path, append);
-
-                                file.write_all(error_output.as_bytes()).unwrap();
-                            } else {
-                                eprint!("{}", error_output);
-                            }
+                        if let Err(_) = env::set_current_dir(&target) {
+                            eprintln!("cd: {}: No such file or directory", target);
                         }
                     }
 
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -453,31 +442,31 @@ fn main() {
 
                         let cmd = &args[0];
 
-                        let output = match cmd.as_str() {
-                            "echo" | "exit" | "pwd" | "cd" | "type" => {
-                                format!("{} is a shell builtin\n", cmd)
-                            }
-
-                            _ => match find_executable(cmd) {
+                        if BUILTINS.contains(&cmd.as_str()) {
+                            println!("{} is a shell builtin", cmd);
+                        } else {
+                            match find_executable(cmd) {
                                 Some(path) => {
-                                    format!("{} is {}\n", cmd, path.display())
+                                    println!("{} is {}", cmd, path.display());
                                 }
 
                                 None => {
-                                    format!("{}: not found\n", cmd)
+                                    println!("{}: not found", cmd);
                                 }
-                            },
-                        };
-
-                        if let Some((file_path, append)) = stdout_redirect {
-                            let mut file = open_file(&file_path, append);
-
-                            file.write_all(output.as_bytes()).unwrap();
-                        } else {
-                            print!("{}", output);
+                            }
                         }
                     }
 
+                    // ======================
+                    // COMPLETE BUILTIN
+                    // ======================
+                    "complete" => {
+                        // No-op for this stage
+                    }
+
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
@@ -612,36 +601,6 @@ fn parse_input(input: &str) -> Vec<String> {
                         continue;
                     }
                 }
-            }
-        }
-
-        if !in_single_quotes && !in_double_quotes {
-            let redirects = ["2>>", "1>>", ">>", "2>", "1>", ">"];
-
-            let remaining: String = chars[i..].iter().collect();
-
-            let mut matched = false;
-
-            for op in redirects {
-                if remaining.starts_with(op) {
-                    if !current.is_empty() {
-                        args.push(current.clone());
-
-                        current.clear();
-                    }
-
-                    args.push(op.to_string());
-
-                    i += op.len();
-
-                    matched = true;
-
-                    break;
-                }
-            }
-
-            if matched {
-                continue;
             }
         }
 
