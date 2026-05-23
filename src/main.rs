@@ -549,6 +549,96 @@ fn main() {
                     continue;
                 }
 
+                // ======================
+                // PIPELINE
+                // ======================
+
+                if let Some(pipe_pos) = parts.iter().position(|p| p == "|") {
+                    let left_parts = &parts[..pipe_pos];
+                    let right_parts = &parts[pipe_pos + 1..];
+
+                    if !left_parts.is_empty() && !right_parts.is_empty() {
+                        let left_cmd = &left_parts[0];
+                        let left_args = &left_parts[1..];
+                        let right_cmd = &right_parts[0];
+                        let right_args = &right_parts[1..];
+
+                        match (
+                            find_executable(left_cmd),
+                            find_executable(right_cmd),
+                        ) {
+                            (Some(left_path), Some(right_path)) => {
+                                let mut left = Command::new(&left_path);
+
+                                #[cfg(unix)]
+                                {
+                                    left.arg0(left_cmd);
+                                }
+
+                                left.args(left_args);
+                                left.stdout(Stdio::piped());
+
+                                if let Some((file_path, append)) = &stderr_redirect {
+                                    let file = open_file(file_path, *append);
+                                    left.stderr(Stdio::from(file));
+                                }
+
+                                let mut left_child = match left.spawn() {
+                                    Ok(c) => c,
+                                    Err(_) => {
+                                        eprintln!("{}: command not found", left_cmd);
+                                        continue;
+                                    }
+                                };
+
+                                let left_stdout = left_child.stdout.take().unwrap();
+
+                                let mut right = Command::new(&right_path);
+
+                                #[cfg(unix)]
+                                {
+                                    right.arg0(right_cmd);
+                                }
+
+                                right.args(right_args);
+                                right.stdin(Stdio::from(left_stdout));
+
+                                if let Some((file_path, append)) = stdout_redirect {
+                                    let file = open_file(&file_path, append);
+                                    right.stdout(Stdio::from(file));
+                                }
+
+                                if let Some((file_path, append)) = &stderr_redirect {
+                                    let file = open_file(file_path, *append);
+                                    right.stderr(Stdio::from(file));
+                                }
+
+                                let right_child = match right.spawn() {
+                                    Ok(c) => c,
+                                    Err(_) => {
+                                        eprintln!("{}: command not found", right_cmd);
+                                        let _ = left_child.kill();
+                                        continue;
+                                    }
+                                };
+
+                                let _ = right_child.wait();
+                                let _ = left_child.wait();
+                            }
+
+                            (None, _) => {
+                                eprintln!("{}: command not found", left_cmd);
+                            }
+
+                            (_, None) => {
+                                eprintln!("{}: command not found", right_cmd);
+                            }
+                        }
+
+                        continue;
+                    }
+                }
+
                 let command = &parts[0];
                 let args = &parts[1..];
 
@@ -753,7 +843,7 @@ fn main() {
                                     Ok(mut child) => {
                                         // BACKGROUND
                                         if background {
-                                            let job_id = jobs.len() + 1;
+                                            let job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
 
                                             let pid = child.id();
 
@@ -895,6 +985,16 @@ fn parse_input(input: &str) -> Vec<String> {
                 }
 
                 args.push(token);
+            }
+
+            '|' if !in_single_quotes && !in_double_quotes => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+
+                    current.clear();
+                }
+
+                args.push("|".to_string());
             }
 
             '>' if !in_single_quotes && !in_double_quotes => {
