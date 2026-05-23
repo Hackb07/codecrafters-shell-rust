@@ -515,14 +515,29 @@ fn main() {
                     // JOBS
                     // ======================
                     "jobs" => {
+                        let mut running: Vec<bool> = Vec::with_capacity(jobs.len());
                         for job in jobs.iter_mut() {
-                            match job.child.try_wait() {
-                                Ok(None) => {
-                                    println!("[{}]+  {:<24}{}", job.id, "Running", job.command);
-                                }
+                            running.push(job.child.try_wait().ok() == Some(None));
+                        }
 
-                                _ => {}
-                            }
+                        let running_indices: Vec<usize> = running
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, &r)| r)
+                            .map(|(i, _)| i)
+                            .collect();
+
+                        let count = running_indices.len();
+
+                        for (pos, &idx) in running_indices.iter().enumerate() {
+                            let marker = if pos == count - 1 {
+                                '+'
+                            } else if pos == count - 2 {
+                                '-'
+                            } else {
+                                ' '
+                            };
+                            println!("[{}]{}  {:<24}{}", jobs[idx].id, marker, "Running", jobs[idx].command);
                         }
                     }
 
