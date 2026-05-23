@@ -53,33 +53,71 @@ impl Completer for ShellCompleter {
 
         let input = &line[..pos];
 
+        // ======================
+        // ARGUMENT COMPLETION
+        // ======================
+
+        let last_space = input.rfind(' ').map(|i| i + 1).unwrap_or(0);
+
+        let prefix = &input[last_space..];
+
         let mut matches: Vec<String> = Vec::new();
 
         // ======================
-        // BUILTIN COMPLETION
+        // COMMAND COMPLETION
         // ======================
 
-        for builtin in builtins {
-            if builtin.starts_with(input) {
-                matches.push(builtin.to_string());
-            }
-        }
-
-        // ======================
-        // EXECUTABLE COMPLETION
-        // ======================
-
-        let path_env = env::var("PATH").unwrap_or_default();
-
-        for dir in env::split_paths(&path_env) {
-            if !dir.exists() {
-                continue;
+        if !input.contains(' ') {
+            // Builtins
+            for builtin in builtins {
+                if builtin.starts_with(prefix) {
+                    matches.push(builtin.to_string());
+                }
             }
 
-            let entries = match fs::read_dir(&dir) {
+            // PATH executables
+            let path_env = env::var("PATH").unwrap_or_default();
+
+            for dir in env::split_paths(&path_env) {
+                if !dir.exists() {
+                    continue;
+                }
+
+                let entries = match fs::read_dir(&dir) {
+                    Ok(entries) => entries,
+
+                    Err(_) => continue,
+                };
+
+                for entry in entries {
+                    let entry = match entry {
+                        Ok(e) => e,
+
+                        Err(_) => continue,
+                    };
+
+                    let path = entry.path();
+
+                    if path.is_file() && is_executable(&path) {
+                        if let Some(name) = path.file_name() {
+                            let name = name.to_string_lossy().to_string();
+
+                            if name.starts_with(prefix) {
+                                matches.push(name);
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // ======================
+            // FILENAME COMPLETION
+            // ======================
+
+            let entries = match fs::read_dir(".") {
                 Ok(entries) => entries,
 
-                Err(_) => continue,
+                Err(_) => return Ok((0, vec![])),
             };
 
             for entry in entries {
@@ -91,13 +129,11 @@ impl Completer for ShellCompleter {
 
                 let path = entry.path();
 
-                if path.is_file() && is_executable(&path) {
-                    if let Some(name) = path.file_name() {
-                        let name = name.to_string_lossy().to_string();
+                if let Some(name) = path.file_name() {
+                    let name = name.to_string_lossy().to_string();
 
-                        if name.starts_with(input) {
-                            matches.push(name);
-                        }
+                    if name.starts_with(prefix) {
+                        matches.push(name);
                     }
                 }
             }
@@ -126,12 +162,18 @@ impl Completer for ShellCompleter {
         if matches.len() == 1 {
             let completion = matches[0].clone();
 
+            let replacement = if input.contains(' ') {
+                format!("{}{} ", &input[..last_space], completion)
+            } else {
+                format!("{} ", completion)
+            };
+
             return Ok((
                 0,
                 vec![Pair {
                     display: completion.clone(),
 
-                    replacement: format!("{} ", completion),
+                    replacement,
                 }],
             ));
         }
@@ -142,14 +184,19 @@ impl Completer for ShellCompleter {
 
         let lcp = longest_common_prefix(&matches);
 
-        // autocomplete to LCP
-        if lcp.len() > input.len() {
+        if lcp.len() > prefix.len() {
+            let replacement = if input.contains(' ') {
+                format!("{}{}", &input[..last_space], lcp)
+            } else {
+                lcp.clone()
+            };
+
             return Ok((
                 0,
                 vec![Pair {
-                    display: lcp.clone(),
+                    display: replacement.clone(),
 
-                    replacement: lcp,
+                    replacement,
                 }],
             ));
         }
@@ -178,7 +225,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // Second TAB -> show matches
+        // Second TAB -> list matches
         println!();
 
         println!("{}", matches.join("  "));
@@ -299,16 +346,10 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // ======================
-                    // EXIT
-                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // ======================
-                    // ECHO
-                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
@@ -325,9 +366,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // PWD
-                    // ======================
                     "pwd" => {
                         let output = match env::current_dir() {
                             Ok(path) => format!("{}\n", path.display()),
@@ -348,9 +386,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // CD
-                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -378,9 +413,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // TYPE
-                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -413,9 +445,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // EXTERNAL COMMANDS
-                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
