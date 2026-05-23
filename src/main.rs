@@ -10,7 +10,7 @@ use rustyline::{
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -67,7 +67,6 @@ impl Completer for ShellCompleter {
 // ======================
 
 fn main() {
-    // Rustyline config
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
@@ -165,14 +164,23 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // exit
+                    // ======================
+                    // EXIT
+                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // echo
+                    // ======================
+                    // ECHO
+                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
+
+                        // Create stderr file even if unused
+                        if let Some((file_path, append)) = &stderr_redirect {
+                            let _ = open_file(file_path, *append);
+                        }
 
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
@@ -183,7 +191,9 @@ fn main() {
                         }
                     }
 
-                    // pwd
+                    // ======================
+                    // PWD
+                    // ======================
                     "pwd" => {
                         let output = match env::current_dir() {
                             Ok(path) => format!("{}\n", path.display()),
@@ -191,6 +201,11 @@ fn main() {
                             Err(_) => "pwd: unable to get current directory\n".to_string(),
                         };
 
+                        // Create stderr file even if unused
+                        if let Some((file_path, append)) = &stderr_redirect {
+                            let _ = open_file(file_path, *append);
+                        }
+
                         if let Some((file_path, append)) = stdout_redirect {
                             let mut file = open_file(&file_path, append);
 
@@ -200,7 +215,9 @@ fn main() {
                         }
                     }
 
-                    // cd
+                    // ======================
+                    // CD
+                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -228,7 +245,9 @@ fn main() {
                         }
                     }
 
-                    // type
+                    // ======================
+                    // TYPE
+                    // ======================
                     "type" => {
                         if args.is_empty() {
                             eprintln!("type: missing argument");
@@ -238,24 +257,39 @@ fn main() {
 
                         let cmd = &args[0];
 
-                        match cmd.as_str() {
+                        let output = match cmd.as_str() {
                             "echo" | "exit" | "pwd" | "cd" | "type" => {
-                                println!("{} is a shell builtin", cmd);
+                                format!("{} is a shell builtin\n", cmd)
                             }
 
                             _ => match find_executable(cmd) {
                                 Some(path) => {
-                                    println!("{} is {}", cmd, path.display());
+                                    format!("{} is {}", cmd, path.display())
                                 }
 
                                 None => {
-                                    println!("{}: not found", cmd);
+                                    format!("{}: not found", cmd)
                                 }
                             },
+                        };
+
+                        // Create stderr file even if unused
+                        if let Some((file_path, append)) = &stderr_redirect {
+                            let _ = open_file(file_path, *append);
+                        }
+
+                        if let Some((file_path, append)) = stdout_redirect {
+                            let mut file = open_file(&file_path, append);
+
+                            file.write_all(output.as_bytes()).unwrap();
+                        } else {
+                            print!("{}", output);
                         }
                     }
 
-                    // external commands
+                    // ======================
+                    // EXTERNAL COMMANDS
+                    // ======================
                     _ => {
                         match find_executable(command) {
                             Some(path) => {
@@ -268,14 +302,14 @@ fn main() {
 
                                 cmd.args(args);
 
-                                // stdout ONLY
+                                // stdout redirect ONLY
                                 if let Some((file_path, append)) = stdout_redirect {
                                     let file = open_file(&file_path, append);
 
                                     cmd.stdout(Stdio::from(file));
                                 }
 
-                                // stderr ONLY
+                                // stderr redirect ONLY
                                 if let Some((file_path, append)) = stderr_redirect {
                                     let file = open_file(&file_path, append);
 
@@ -350,7 +384,7 @@ fn parse_input(input: &str) -> Vec<String> {
     while i < chars.len() {
         let ch = chars[i];
 
-        // Double quote escapes
+        // Backslashes inside double quotes
         if ch == '\\' && in_double_quotes {
             if i + 1 < chars.len() {
                 let next = chars[i + 1];
