@@ -563,75 +563,261 @@ fn main() {
                         let right_cmd = &right_parts[0];
                         let right_args = &right_parts[1..];
 
-                        match (
-                            find_executable(left_cmd),
-                            find_executable(right_cmd),
-                        ) {
-                            (Some(left_path), Some(right_path)) => {
-                                let mut left = Command::new(&left_path);
+                        let left_is_builtin = BUILTINS.contains(&left_cmd.as_str());
+                        let right_is_builtin = BUILTINS.contains(&right_cmd.as_str());
 
-                                #[cfg(unix)]
-                                {
-                                    left.arg0(left_cmd);
-                                }
-
-                                left.args(left_args);
-                                left.stdout(Stdio::piped());
-
-                                if let Some((file_path, append)) = &stderr_redirect {
-                                    let file = open_file(file_path, *append);
-                                    left.stderr(Stdio::from(file));
-                                }
-
-                                let mut left_child = match left.spawn() {
-                                    Ok(c) => c,
-                                    Err(_) => {
-                                        eprintln!("{}: command not found", left_cmd);
-                                        continue;
+                        if left_is_builtin {
+                            let output = match left_cmd.as_str() {
+                                "echo" => format!("{}\n", left_args.join(" ")),
+                                "pwd" => format!("{}\n", env::current_dir().unwrap().display()),
+                                "type" => {
+                                    let mut s = String::new();
+                                    if !left_args.is_empty() {
+                                        let cmd = &left_args[0];
+                                        if BUILTINS.contains(&cmd.as_str()) {
+                                            s = format!("{} is a shell builtin\n", cmd);
+                                        } else {
+                                            match find_executable(cmd) {
+                                                Some(path) => {
+                                                    s = format!("{} is {}\n", cmd, path.display());
+                                                }
+                                                None => {
+                                                    s = format!("{}: not found\n", cmd);
+                                                }
+                                            }
+                                        }
                                     }
-                                };
-
-                                let left_stdout = left_child.stdout.take().unwrap();
-
-                                let mut right = Command::new(&right_path);
-
-                                #[cfg(unix)]
-                                {
-                                    right.arg0(right_cmd);
+                                    s
                                 }
+                                _ => String::new(),
+                            };
 
-                                right.args(right_args);
-                                right.stdin(Stdio::from(left_stdout));
+                            if right_is_builtin {
+                                let _ = output;
+                            } else {
+                                match find_executable(right_cmd) {
+                                    Some(right_path) => {
+                                        let mut right = Command::new(&right_path);
 
-                                if let Some((file_path, append)) = stdout_redirect {
-                                    let file = open_file(&file_path, append);
-                                    right.stdout(Stdio::from(file));
-                                }
+                                        #[cfg(unix)]
+                                        {
+                                            right.arg0(right_cmd);
+                                        }
 
-                                if let Some((file_path, append)) = &stderr_redirect {
-                                    let file = open_file(file_path, *append);
-                                    right.stderr(Stdio::from(file));
-                                }
+                                        right.args(right_args);
+                                        right.stdin(Stdio::piped());
 
-                                let mut right_child = match right.spawn() {
-                                    Ok(c) => c,
-                                    Err(_) => {
+                                        if let Some((file_path, append)) = stdout_redirect {
+                                            let file = open_file(&file_path, append);
+                                            right.stdout(Stdio::from(file));
+                                        }
+
+                                        if let Some((file_path, append)) = &stderr_redirect {
+                                            let file = open_file(file_path, *append);
+                                            right.stderr(Stdio::from(file));
+                                        }
+
+                                        let mut right_child = match right.spawn() {
+                                            Ok(c) => c,
+                                            Err(_) => {
+                                                eprintln!(
+                                                    "{}: command not found",
+                                                    right_cmd
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                        if let Some(mut stdin) = right_child.stdin.take() {
+                                            let _ = stdin.write_all(output.as_bytes());
+                                        }
+
+                                        let _ = right_child.wait();
+                                    }
+
+                                    None => {
                                         eprintln!("{}: command not found", right_cmd);
-                                        let _ = left_child.kill();
-                                        continue;
                                     }
-                                };
-
-                                let _ = right_child.wait();
-                                let _ = left_child.wait();
+                                }
                             }
+                        } else {
+                            match find_executable(left_cmd) {
+                                Some(left_path) => {
+                                    if right_is_builtin {
+                                        let mut left = Command::new(&left_path);
 
-                            (None, _) => {
-                                eprintln!("{}: command not found", left_cmd);
-                            }
+                                        #[cfg(unix)]
+                                        {
+                                            left.arg0(left_cmd);
+                                        }
 
-                            (_, None) => {
-                                eprintln!("{}: command not found", right_cmd);
+                                        left.args(left_args);
+                                        left.stdout(Stdio::null());
+
+                                        if let Some((file_path, append)) = &stderr_redirect {
+                                            let file = open_file(file_path, *append);
+                                            left.stderr(Stdio::from(file));
+                                        }
+
+                                        let mut left_child = match left.spawn() {
+                                            Ok(c) => c,
+                                            Err(_) => {
+                                                eprintln!(
+                                                    "{}: command not found",
+                                                    left_cmd
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                        match right_cmd.as_str() {
+                                            "echo" => {
+                                                println!("{}", right_args.join(" "));
+                                            }
+                                            "type" => {
+                                                if !right_args.is_empty() {
+                                                    let cmd = &right_args[0];
+                                                    if BUILTINS.contains(&cmd.as_str()) {
+                                                        println!(
+                                                            "{} is a shell builtin",
+                                                            cmd
+                                                        );
+                                                    } else {
+                                                        match find_executable(cmd) {
+                                                            Some(path) => {
+                                                                println!(
+                                                                    "{} is {}",
+                                                                    cmd,
+                                                                    path.display()
+                                                                );
+                                                            }
+                                                            None => {
+                                                                println!(
+                                                                    "{}: not found",
+                                                                    cmd
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            "pwd" => {
+                                                println!(
+                                                    "{}",
+                                                    env::current_dir()
+                                                        .unwrap()
+                                                        .display()
+                                                );
+                                            }
+                                            "exit" => {
+                                                break;
+                                            }
+                                            _ => {}
+                                        }
+
+                                        let _ = left_child.wait();
+                                    } else {
+                                        match find_executable(right_cmd) {
+                                            Some(right_path) => {
+                                                let mut left = Command::new(&left_path);
+
+                                                #[cfg(unix)]
+                                                {
+                                                    left.arg0(left_cmd);
+                                                }
+
+                                                left.args(left_args);
+                                                left.stdout(Stdio::piped());
+
+                                                if let Some((file_path, append)) =
+                                                    &stderr_redirect
+                                                {
+                                                    let file = open_file(
+                                                        file_path,
+                                                        *append,
+                                                    );
+                                                    left.stderr(Stdio::from(file));
+                                                }
+
+                                                let mut left_child = match left.spawn() {
+                                                    Ok(c) => c,
+                                                    Err(_) => {
+                                                        eprintln!(
+                                                            "{}: command not found",
+                                                            left_cmd
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+
+                                                let left_stdout = left_child
+                                                    .stdout
+                                                    .take()
+                                                    .unwrap();
+
+                                                let mut right =
+                                                    Command::new(&right_path);
+
+                                                #[cfg(unix)]
+                                                {
+                                                    right.arg0(right_cmd);
+                                                }
+
+                                                right.args(right_args);
+                                                right
+                                                    .stdin(Stdio::from(left_stdout));
+
+                                                if let Some((file_path, append)) =
+                                                    stdout_redirect
+                                                {
+                                                    let file = open_file(
+                                                        &file_path,
+                                                        append,
+                                                    );
+                                                    right.stdout(Stdio::from(file));
+                                                }
+
+                                                if let Some((file_path, append)) =
+                                                    &stderr_redirect
+                                                {
+                                                    let file = open_file(
+                                                        file_path,
+                                                        *append,
+                                                    );
+                                                    right.stderr(Stdio::from(file));
+                                                }
+
+                                                let mut right_child =
+                                                    match right.spawn() {
+                                                        Ok(c) => c,
+                                                        Err(_) => {
+                                                            eprintln!(
+                                                                "{}: command not found",
+                                                                right_cmd
+                                                            );
+                                                            let _ =
+                                                                left_child.kill();
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                let _ = right_child.wait();
+                                                let _ = left_child.wait();
+                                            }
+
+                                            None => {
+                                                eprintln!(
+                                                    "{}: command not found",
+                                                    right_cmd
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+
+                                None => {
+                                    eprintln!("{}: command not found", left_cmd);
+                                }
                             }
                         }
 
