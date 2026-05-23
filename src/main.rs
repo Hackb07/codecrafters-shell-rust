@@ -76,13 +76,10 @@ impl Completer for ShellCompleter {
                 let completions = self.completions.borrow();
 
                 if let Some(script_path) = completions.get(command_name) {
-                    // argv[1]
                     let arg1 = command_name;
 
-                    // argv[2]
                     let arg2 = current_arg;
 
-                    // argv[3]
                     let arg3 = if words.len() >= 2 {
                         words.get(words.len() - 2).unwrap_or(&"")
                     } else {
@@ -100,10 +97,20 @@ impl Completer for ShellCompleter {
                     if let Ok(output) = output {
                         let stdout = String::from_utf8_lossy(&output.stdout);
 
-                        let lines: Vec<&str> = stdout.lines().collect();
+                        let mut candidates: Vec<String> = stdout
+                            .lines()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
 
-                        if lines.len() == 1 {
-                            let candidate = lines[0].trim();
+                        candidates.sort();
+
+                        // ======================
+                        // SINGLE CANDIDATE
+                        // ======================
+
+                        if candidates.len() == 1 {
+                            let candidate = &candidates[0];
 
                             let replacement = format!("{}{} ", &input[..last_space], candidate);
 
@@ -116,28 +123,67 @@ impl Completer for ShellCompleter {
                                 }],
                             ));
                         }
+
+                        // ======================
+                        // MULTIPLE CANDIDATES
+                        // ======================
+
+                        if candidates.len() > 1 {
+                            let mut last_input = self.last_input.borrow_mut();
+
+                            let mut tab_count = self.tab_count.borrow_mut();
+
+                            if *last_input == input {
+                                *tab_count += 1;
+                            } else {
+                                *tab_count = 1;
+
+                                *last_input = input.to_string();
+                            }
+
+                            // FIRST TAB
+                            if *tab_count == 1 {
+                                print!("\x07");
+
+                                std::io::stdout().flush().unwrap();
+
+                                return Ok((0, vec![]));
+                            }
+
+                            // SECOND TAB
+                            println!();
+
+                            println!("{}", candidates.join("  "));
+
+                            print!("$ {}", input);
+
+                            std::io::stdout().flush().unwrap();
+
+                            *tab_count = 0;
+
+                            return Ok((0, vec![]));
+                        }
                     }
                 }
             }
         }
 
+        // ======================
+        // NORMAL COMPLETION
+        // ======================
+
         let mut matches: Vec<(String, bool)> = Vec::new();
 
         let is_command_position = !input.contains(' ');
 
-        // ======================
-        // COMMAND COMPLETION
-        // ======================
-
+        // BUILTINS + EXECUTABLES
         if is_command_position {
-            // BUILTINS
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
                     matches.push((builtin.to_string(), false));
                 }
             }
 
-            // PATH EXECUTABLES
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -173,10 +219,7 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // ======================
-        // FILE / DIR COMPLETION
-        // ======================
-
+        // FILE/DIR COMPLETION
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
             (&current_arg[..idx + 1], &current_arg[idx + 1..])
         } else {
@@ -211,18 +254,11 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // ======================
-        // SORT + DEDUP
-        // ======================
-
         matches.sort_by(|a, b| a.0.cmp(&b.0));
 
         matches.dedup_by(|a, b| a.0 == b.0);
 
-        // ======================
-        // NO MATCHES
-        // ======================
-
+        // NO MATCH
         if matches.is_empty() {
             print!("\x07");
 
@@ -231,10 +267,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // ======================
         // SINGLE MATCH
-        // ======================
-
         if matches.len() == 1 {
             let (completion, is_dir) = matches[0].clone();
 
@@ -254,31 +287,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // ======================
-        // LONGEST COMMON PREFIX
-        // ======================
-
-        let names: Vec<String> = matches.iter().map(|m| m.0.clone()).collect();
-
-        let lcp = longest_common_prefix(&names);
-
-        if lcp.len() > current_arg.len() {
-            let replacement = format!("{}{}", &input[..last_space], lcp);
-
-            return Ok((
-                0,
-                vec![Pair {
-                    display: replacement.clone(),
-
-                    replacement,
-                }],
-            ));
-        }
-
-        // ======================
         // MULTIPLE MATCHES
-        // ======================
-
         let mut last_input = self.last_input.borrow_mut();
 
         let mut tab_count = self.tab_count.borrow_mut();
@@ -366,110 +375,22 @@ fn main() {
                     continue;
                 }
 
-                let mut stdout_redirect: Option<(String, bool)> = None;
-
-                let mut stderr_redirect: Option<(String, bool)> = None;
-
-                let mut cleaned_parts = Vec::new();
-
-                let mut i = 0;
-
-                while i < parts.len() {
-                    match parts[i].as_str() {
-                        ">" | "1>" => {
-                            if i + 1 < parts.len() {
-                                stdout_redirect = Some((parts[i + 1].clone(), false));
-
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-
-                        ">>" | "1>>" => {
-                            if i + 1 < parts.len() {
-                                stdout_redirect = Some((parts[i + 1].clone(), true));
-
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-
-                        "2>" => {
-                            if i + 1 < parts.len() {
-                                stderr_redirect = Some((parts[i + 1].clone(), false));
-
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-
-                        "2>>" => {
-                            if i + 1 < parts.len() {
-                                stderr_redirect = Some((parts[i + 1].clone(), true));
-
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-
-                        _ => {
-                            cleaned_parts.push(parts[i].clone());
-
-                            i += 1;
-                        }
-                    }
-                }
-
-                parts = cleaned_parts;
-
-                if parts.is_empty() {
-                    continue;
-                }
-
                 let command = &parts[0];
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // ======================
-                    // EXIT
-                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // ======================
-                    // ECHO
-                    // ======================
                     "echo" => {
-                        let output = format!("{}\n", args.join(" "));
-
-                        if let Some((file_path, append)) = &stderr_redirect {
-                            let _ = open_file(file_path, *append);
-                        }
-
-                        if let Some((file_path, append)) = stdout_redirect {
-                            let mut file = open_file(&file_path, append);
-
-                            file.write_all(output.as_bytes()).unwrap();
-                        } else {
-                            print!("{}", output);
-                        }
+                        println!("{}", args.join(" "));
                     }
 
-                    // ======================
-                    // PWD
-                    // ======================
                     "pwd" => {
                         println!("{}", env::current_dir().unwrap().display());
                     }
 
-                    // ======================
-                    // CD
-                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -486,9 +407,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // TYPE
-                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -511,9 +429,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // COMPLETE
-                    // ======================
                     "complete" => {
                         // REGISTER
                         if args.len() >= 3 && args[0] == "-C" {
@@ -545,9 +460,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // EXTERNAL COMMANDS
-                    // ======================
                     _ => match find_executable(command) {
                         Some(path) => {
                             let mut cmd = Command::new(&path);
@@ -558,18 +470,6 @@ fn main() {
                             }
 
                             cmd.args(args);
-
-                            if let Some((file_path, append)) = stdout_redirect {
-                                let file = open_file(&file_path, append);
-
-                                cmd.stdout(Stdio::from(file));
-                            }
-
-                            if let Some((file_path, append)) = stderr_redirect {
-                                let file = open_file(&file_path, append);
-
-                                cmd.stderr(Stdio::from(file));
-                            }
 
                             match cmd.spawn() {
                                 Ok(mut child) => {
@@ -603,44 +503,6 @@ fn main() {
             }
         }
     }
-}
-
-// ======================
-// LONGEST COMMON PREFIX
-// ======================
-
-fn longest_common_prefix(strings: &[String]) -> String {
-    if strings.is_empty() {
-        return String::new();
-    }
-
-    let mut prefix = strings[0].clone();
-
-    for s in strings.iter().skip(1) {
-        while !s.starts_with(&prefix) {
-            prefix.pop();
-
-            if prefix.is_empty() {
-                break;
-            }
-        }
-    }
-
-    prefix
-}
-
-// ======================
-// FILE OPEN
-// ======================
-
-fn open_file(path: &str, append: bool) -> File {
-    OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(append)
-        .truncate(!append)
-        .open(path)
-        .unwrap()
 }
 
 // ======================
