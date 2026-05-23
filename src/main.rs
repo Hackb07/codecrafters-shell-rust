@@ -13,6 +13,6 @@ fn main() {
         if command == "exit" {
             break;
         }
-        println!("{}: command not found", command);
+        println!("{:?}", command);
     }
 }
