@@ -74,14 +74,137 @@ impl Completer for ShellCompleter {
 
         let current_arg = &input[last_space..];
 
+        // ======================
+        // CUSTOM COMPLETERS
+        // ======================
+
+        if input.contains(' ') {
+            let words: Vec<&str> = input.split_whitespace().collect();
+
+            if !words.is_empty() {
+                let command_name = words[0];
+
+                let completions = self.completions.borrow();
+
+                if let Some(script_path) = completions.get(command_name) {
+                    let arg1 = command_name;
+
+                    let arg2 = current_arg;
+
+                    let arg3 = if words.len() >= 2 {
+                        words.get(words.len() - 2).unwrap_or(&"")
+                    } else {
+                        &""
+                    };
+
+                    let output = Command::new(script_path)
+                        .arg(arg1)
+                        .arg(arg2)
+                        .arg(arg3)
+                        .env("COMP_LINE", input)
+                        .env("COMP_POINT", pos.to_string())
+                        .output();
+
+                    if let Ok(output) = output {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+
+                        let mut candidates: Vec<String> = stdout
+                            .lines()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+
+                        candidates.sort();
+
+                        // NO MATCH
+                        if candidates.is_empty() {
+                            print!("\x07");
+
+                            std::io::stdout().flush().unwrap();
+
+                            return Ok((0, vec![]));
+                        }
+
+                        // SINGLE MATCH
+                        if candidates.len() == 1 {
+                            let candidate = &candidates[0];
+
+                            let replacement = format!("{}{} ", &input[..last_space], candidate);
+
+                            return Ok((
+                                0,
+                                vec![Pair {
+                                    display: candidate.clone(),
+
+                                    replacement,
+                                }],
+                            ));
+                        }
+
+                        // LONGEST COMMON PREFIX
+                        let lcp = longest_common_prefix(&candidates);
+
+                        if lcp.len() > current_arg.len() {
+                            let replacement = format!("{}{}", &input[..last_space], lcp);
+
+                            return Ok((
+                                0,
+                                vec![Pair {
+                                    display: lcp.clone(),
+
+                                    replacement,
+                                }],
+                            ));
+                        }
+
+                        // MULTIPLE MATCHES
+                        let mut last_input = self.last_input.borrow_mut();
+
+                        let mut tab_count = self.tab_count.borrow_mut();
+
+                        if *last_input == input {
+                            *tab_count += 1;
+                        } else {
+                            *tab_count = 1;
+
+                            *last_input = input.to_string();
+                        }
+
+                        // FIRST TAB
+                        if *tab_count == 1 {
+                            print!("\x07");
+
+                            std::io::stdout().flush().unwrap();
+
+                            return Ok((0, vec![]));
+                        }
+
+                        // SECOND TAB
+                        println!();
+
+                        println!("{}", candidates.join("  "));
+
+                        print!("$ {}", input);
+
+                        std::io::stdout().flush().unwrap();
+
+                        *tab_count = 0;
+
+                        return Ok((0, vec![]));
+                    }
+                }
+            }
+        }
+
+        // ======================
+        // NORMAL COMPLETION
+        // ======================
+
         let mut matches: Vec<(String, bool)> = Vec::new();
 
         let is_command_position = !input.contains(' ');
 
-        // ======================
-        // BUILTIN COMPLETION
-        // ======================
-
+        // BUILTINS + EXECUTABLES
         if is_command_position {
             for builtin in BUILTINS {
                 if builtin.starts_with(current_arg) {
@@ -89,7 +212,6 @@ impl Completer for ShellCompleter {
                 }
             }
 
-            // EXECUTABLES
             let path_env = env::var("PATH").unwrap_or_default();
 
             for dir in env::split_paths(&path_env) {
@@ -123,10 +245,7 @@ impl Completer for ShellCompleter {
             }
         }
 
-        // ======================
-        // FILE COMPLETION
-        // ======================
-
+        // FILE / DIR COMPLETION
         let (search_dir, prefix) = if let Some(idx) = current_arg.rfind('/') {
             (&current_arg[..idx + 1], &current_arg[idx + 1..])
         } else {
@@ -164,10 +283,7 @@ impl Completer for ShellCompleter {
 
         matches.dedup_by(|a, b| a.0 == b.0);
 
-        // ======================
         // NO MATCH
-        // ======================
-
         if matches.is_empty() {
             print!("\x07");
 
@@ -176,10 +292,7 @@ impl Completer for ShellCompleter {
             return Ok((0, vec![]));
         }
 
-        // ======================
         // SINGLE MATCH
-        // ======================
-
         if matches.len() == 1 {
             let (completion, is_dir) = matches[0].clone();
 
@@ -199,10 +312,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // ======================
-        // LCP
-        // ======================
-
+        // LONGEST COMMON PREFIX
         let names: Vec<String> = matches.iter().map(|m| m.0.clone()).collect();
 
         let lcp = longest_common_prefix(&names);
@@ -219,10 +329,7 @@ impl Completer for ShellCompleter {
             ));
         }
 
-        // ======================
         // MULTIPLE MATCHES
-        // ======================
-
         let mut last_input = self.last_input.borrow_mut();
 
         let mut tab_count = self.tab_count.borrow_mut();
@@ -312,10 +419,6 @@ fn main() {
                     continue;
                 }
 
-                // ======================
-                // BACKGROUND JOB
-                // ======================
-
                 let mut background = false;
 
                 if let Some(last) = parts.last() {
@@ -324,10 +427,6 @@ fn main() {
                         parts.pop();
                     }
                 }
-
-                // ======================
-                // REDIRECTION
-                // ======================
 
                 let mut stdout_redirect: Option<(String, bool)> = None;
 
@@ -397,21 +496,12 @@ fn main() {
                 let args = &parts[1..];
 
                 match command.as_str() {
-                    // ======================
-                    // EXIT
-                    // ======================
                     "exit" => {
                         break;
                     }
 
-                    // ======================
-                    // JOBS
-                    // ======================
                     "jobs" => {}
 
-                    // ======================
-                    // ECHO
-                    // ======================
                     "echo" => {
                         let output = format!("{}\n", args.join(" "));
 
@@ -424,16 +514,10 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // PWD
-                    // ======================
                     "pwd" => {
                         println!("{}", env::current_dir().unwrap().display());
                     }
 
-                    // ======================
-                    // CD
-                    // ======================
                     "cd" => {
                         if args.is_empty() {
                             continue;
@@ -450,9 +534,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // TYPE
-                    // ======================
                     "type" => {
                         if args.is_empty() {
                             continue;
@@ -475,9 +556,6 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // COMPLETE
-                    // ======================
                     "complete" => {
                         // REGISTER
                         if args.len() >= 3 && args[0] == "-C" {
@@ -517,72 +595,59 @@ fn main() {
                         }
                     }
 
-                    // ======================
-                    // EXTERNAL COMMANDS
-                    // ======================
-                    _ => {
-                        match find_executable(command) {
-                            Some(path) => {
-                                let mut cmd = Command::new(&path);
+                    _ => match find_executable(command) {
+                        Some(path) => {
+                            let mut cmd = Command::new(&path);
 
-                                #[cfg(unix)]
-                                {
-                                    cmd.arg0(command);
-                                }
-
-                                cmd.args(args);
-
-                                if let Some((file_path, append)) = stdout_redirect {
-                                    let file = open_file(&file_path, append);
-
-                                    cmd.stdout(Stdio::from(file));
-                                }
-
-                                if let Some((file_path, append)) = stderr_redirect {
-                                    let file = open_file(&file_path, append);
-
-                                    cmd.stderr(Stdio::from(file));
-                                }
-
-                                match cmd.spawn() {
-                                    Ok(mut child) => {
-                                        // ======================
-                                        // BACKGROUND
-                                        // ======================
-
-                                        if background {
-                                            let job_id = jobs.len() + 1;
-
-                                            let pid = child.id();
-
-                                            println!("[{}] {}", job_id, pid);
-
-                                            jobs.push(Job {
-                                                id: job_id,
-                                                pid,
-                                                command: input.to_string(),
-                                                child,
-                                            });
-                                        }
-                                        // ======================
-                                        // FOREGROUND
-                                        // ======================
-                                        else {
-                                            child.wait().unwrap();
-                                        }
-                                    }
-
-                                    Err(_) => {
-                                        eprintln!("{}: command not found", command);
-                                    }
-                                }
+                            #[cfg(unix)]
+                            {
+                                cmd.arg0(command);
                             }
 
-                            None => {
-                                eprintln!("{}: command not found", command);
+                            cmd.args(args);
+
+                            if let Some((file_path, append)) = stdout_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stdout(Stdio::from(file));
+                            }
+
+                            if let Some((file_path, append)) = stderr_redirect {
+                                let file = open_file(&file_path, append);
+
+                                cmd.stderr(Stdio::from(file));
+                            }
+
+                            match cmd.spawn() {
+                                Ok(mut child) => {
+                                    if background {
+                                        let job_id = jobs.len() + 1;
+
+                                        let pid = child.id();
+
+                                        println!("[{}] {}", job_id, pid);
+
+                                        jobs.push(Job {
+                                            id: job_id,
+                                            pid,
+                                            command: input.to_string(),
+                                            child,
+                                        });
+                                    } else {
+                                        child.wait().unwrap();
+                                    }
+                                }
+
+                                Err(_) => {
+                                    eprintln!("{}: command not found", command);
+                                }
                             }
                         }
-                    }
+
+                        None => {
+                            eprintln!("{}: command not found", command);
+                        }
+                    },
                 }
             }
 
