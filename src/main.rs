@@ -1093,7 +1093,9 @@ fn main() {
                     // HISTORY
                     // ======================
                     "history" => {
-                        for (i, entry) in cmd_history.iter().enumerate() {
+                        let n = args.first().and_then(|s| s.parse::<usize>().ok());
+                        let start = n.map(|n| cmd_history.len().saturating_sub(n)).unwrap_or(0);
+                        for (i, entry) in cmd_history.iter().enumerate().skip(start) {
                             println!("{:>5}  {}", i + 1, entry);
                         }
                     }
