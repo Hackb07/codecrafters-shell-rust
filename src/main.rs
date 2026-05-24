@@ -26,7 +26,7 @@ use std::os::unix::process::CommandExt;
 // BUILTINS
 // ======================
 
-const BUILTINS: [&str; 8] = ["echo", "exit", "pwd", "cd", "type", "complete", "jobs", "history"];
+const BUILTINS: [&str; 9] = ["echo", "exit", "pwd", "cd", "type", "declare", "complete", "jobs", "history"];
 
 // ======================
 // JOB
@@ -1216,6 +1216,13 @@ fn main() {
                                 }
                             }
                         }
+                    }
+
+                    // ======================
+                    // DECLARE
+                    // ======================
+                    "declare" => {
+                        // Behavior will be implemented in later stages
                     }
 
                     // ======================
