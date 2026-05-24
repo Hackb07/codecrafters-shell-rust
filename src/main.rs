@@ -464,6 +464,7 @@ fn main() {
                 }
 
                 cmd_history.push(input.to_string());
+                let _ = rl.add_history_entry(input);
 
                 let mut parts = parse_input(input);
 
