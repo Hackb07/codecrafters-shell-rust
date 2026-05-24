@@ -1233,7 +1233,11 @@ fn main() {
                         } else if let Some(eq_pos) = args.first().and_then(|a| a.find('=')) {
                             let name = args[0][..eq_pos].to_string();
                             let value = args[0][eq_pos + 1..].to_string();
-                            variables.insert(name, value);
+                            if !is_valid_identifier(&name) {
+                                eprintln!("declare: `{}': not a valid identifier", args[0]);
+                            } else {
+                                variables.insert(name, value);
+                            }
                         }
                     }
 
@@ -1559,6 +1563,27 @@ fn find_executable(command: &str) -> Option<PathBuf> {
 // ======================
 // EXECUTABLE CHECK
 // ======================
+
+fn is_valid_identifier(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+
+    let mut chars = name.chars();
+    if let Some(c) = chars.next() {
+        if !c.is_ascii_alphabetic() && c != '_' {
+            return false;
+        }
+    }
+
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            return false;
+        }
+    }
+
+    true
+}
 
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
