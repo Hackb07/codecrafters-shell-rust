@@ -1043,6 +1043,12 @@ fn main() {
                     *part = expand_variables(part, &variables);
                 }
 
+                parts.retain(|p| !p.is_empty());
+
+                if parts.is_empty() {
+                    continue;
+                }
+
                 let command = &parts[0];
                 let args = &parts[1..];
 
