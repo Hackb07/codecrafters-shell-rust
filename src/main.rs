@@ -448,6 +448,7 @@ fn main() {
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
 
     let mut jobs: Vec<Job> = Vec::new();
+    let mut variables: HashMap<String, String> = HashMap::new();
     let mut cmd_history: Vec<String> = Vec::new();
     let mut last_written_count: usize = 0;
 
@@ -1223,7 +1224,16 @@ fn main() {
                     // ======================
                     "declare" => {
                         if args.len() >= 2 && args[0] == "-p" {
-                            eprintln!("declare: {}: not found", args[1]);
+                            let name = &args[1];
+                            if let Some(value) = variables.get(name) {
+                                println!("declare -- {}=\"{}\"", name, value);
+                            } else {
+                                eprintln!("declare: {}: not found", name);
+                            }
+                        } else if let Some(eq_pos) = args.first().and_then(|a| a.find('=')) {
+                            let name = args[0][..eq_pos].to_string();
+                            let value = args[0][eq_pos + 1..].to_string();
+                            variables.insert(name, value);
                         }
                     }
 
