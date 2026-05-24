@@ -1039,6 +1039,10 @@ fn main() {
                     }
                 }
 
+                for part in parts.iter_mut() {
+                    *part = expand_variables(part, &variables);
+                }
+
                 let command = &parts[0];
                 let args = &parts[1..];
 
@@ -1583,6 +1587,39 @@ fn is_valid_identifier(name: &str) -> bool {
     }
 
     true
+}
+
+fn expand_variables(s: &str, variables: &HashMap<String, String>) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '$' {
+            let mut name = String::new();
+            if let Some(&next) = chars.peek() {
+                if next.is_ascii_alphabetic() || next == '_' {
+                    name.push(chars.next().unwrap());
+                    while let Some(&c) = chars.peek() {
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            name.push(chars.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    let value = variables.get(&name).map(|s| s.as_str()).unwrap_or("");
+                    result.push_str(value);
+                } else {
+                    result.push(ch);
+                }
+            } else {
+                result.push(ch);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
 }
 
 fn is_executable(path: &Path) -> bool {
