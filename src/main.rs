@@ -1105,6 +1105,14 @@ fn main() {
                                     }
                                 }
                             }
+                        } else if args.len() >= 2 && args[0] == "-w" {
+                            let path = &args[1];
+                            let mut content = String::new();
+                            for entry in &cmd_history {
+                                content.push_str(entry);
+                                content.push('\n');
+                            }
+                            let _ = fs::write(path, content);
                         } else {
                             let n = args.first().and_then(|s| s.parse::<usize>().ok());
                             let start = n.map(|n| cmd_history.len().saturating_sub(n)).unwrap_or(0);
