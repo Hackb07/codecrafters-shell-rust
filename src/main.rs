@@ -1222,7 +1222,9 @@ fn main() {
                     // DECLARE
                     // ======================
                     "declare" => {
-                        // Behavior will be implemented in later stages
+                        if args.len() >= 2 && args[0] == "-p" {
+                            eprintln!("declare: {}: not found", args[1]);
+                        }
                     }
 
                     // ======================
