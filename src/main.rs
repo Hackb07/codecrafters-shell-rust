@@ -1094,10 +1094,23 @@ fn main() {
                     // HISTORY
                     // ======================
                     "history" => {
-                        let n = args.first().and_then(|s| s.parse::<usize>().ok());
-                        let start = n.map(|n| cmd_history.len().saturating_sub(n)).unwrap_or(0);
-                        for (i, entry) in cmd_history.iter().enumerate().skip(start) {
-                            println!("{:>5}  {}", i + 1, entry);
+                        if args.len() >= 2 && args[0] == "-r" {
+                            let path = &args[1];
+                            if let Ok(contents) = fs::read_to_string(path) {
+                                for line in contents.lines() {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() {
+                                        cmd_history.push(trimmed.to_string());
+                                        let _ = rl.add_history_entry(trimmed);
+                                    }
+                                }
+                            }
+                        } else {
+                            let n = args.first().and_then(|s| s.parse::<usize>().ok());
+                            let start = n.map(|n| cmd_history.len().saturating_sub(n)).unwrap_or(0);
+                            for (i, entry) in cmd_history.iter().enumerate().skip(start) {
+                                println!("{:>5}  {}", i + 1, entry);
+                            }
                         }
                     }
 
