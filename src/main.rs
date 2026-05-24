@@ -1595,9 +1595,22 @@ fn expand_variables(s: &str, variables: &HashMap<String, String>) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '$' {
-            let mut name = String::new();
-            if let Some(&next) = chars.peek() {
-                if next.is_ascii_alphabetic() || next == '_' {
+            match chars.peek() {
+                Some(&'{') => {
+                    chars.next();
+                    let mut name = String::new();
+                    while let Some(&c) = chars.peek() {
+                        if c == '}' {
+                            chars.next();
+                            break;
+                        }
+                        name.push(chars.next().unwrap());
+                    }
+                    let value = variables.get(&name).map(|s| s.as_str()).unwrap_or("");
+                    result.push_str(value);
+                }
+                Some(&next) if next.is_ascii_alphabetic() || next == '_' => {
+                    let mut name = String::new();
                     name.push(chars.next().unwrap());
                     while let Some(&c) = chars.peek() {
                         if c.is_ascii_alphanumeric() || c == '_' {
@@ -1608,11 +1621,10 @@ fn expand_variables(s: &str, variables: &HashMap<String, String>) -> String {
                     }
                     let value = variables.get(&name).map(|s| s.as_str()).unwrap_or("");
                     result.push_str(value);
-                } else {
+                }
+                _ => {
                     result.push(ch);
                 }
-            } else {
-                result.push(ch);
             }
         } else {
             result.push(ch);
