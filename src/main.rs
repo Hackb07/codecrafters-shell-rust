@@ -451,6 +451,18 @@ fn main() {
     let mut cmd_history: Vec<String> = Vec::new();
     let mut last_written_count: usize = 0;
 
+    if let Ok(histfile) = env::var("HISTFILE") {
+        if let Ok(contents) = fs::read_to_string(&histfile) {
+            for line in contents.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    cmd_history.push(trimmed.to_string());
+                    let _ = rl.add_history_entry(trimmed);
+                }
+            }
+        }
+    }
+
     loop {
         reap_jobs(&mut jobs);
 
@@ -1320,6 +1332,15 @@ fn main() {
                 break;
             }
         }
+    }
+
+    if let Ok(histfile) = env::var("HISTFILE") {
+        let mut content = String::new();
+        for entry in &cmd_history {
+            content.push_str(entry);
+            content.push('\n');
+        }
+        let _ = fs::write(&histfile, content);
     }
 }
 
