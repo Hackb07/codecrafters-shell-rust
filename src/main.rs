@@ -449,6 +449,7 @@ fn main() {
 
     let mut jobs: Vec<Job> = Vec::new();
     let mut cmd_history: Vec<String> = Vec::new();
+    let mut last_written_count: usize = 0;
 
     loop {
         reap_jobs(&mut jobs);
@@ -1113,6 +1114,18 @@ fn main() {
                                 content.push('\n');
                             }
                             let _ = fs::write(path, content);
+                        } else if args.len() >= 2 && args[0] == "-a" {
+                            let path = &args[1];
+                            if let Ok(mut file) = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(path)
+                            {
+                                for entry in cmd_history.iter().skip(last_written_count) {
+                                    let _ = writeln!(file, "{}", entry);
+                                }
+                                last_written_count = cmd_history.len();
+                            }
                         } else {
                             let n = args.first().and_then(|s| s.parse::<usize>().ok());
                             let start = n.map(|n| cmd_history.len().saturating_sub(n)).unwrap_or(0);
