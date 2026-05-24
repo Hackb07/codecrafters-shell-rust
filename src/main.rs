@@ -2,7 +2,7 @@ use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
-use rustyline::history::{DefaultHistory, History, SearchDirection};
+use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, Config, Context, Editor, Helper, KeyCode, KeyEvent, Modifiers,
@@ -448,6 +448,7 @@ fn main() {
     rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), Cmd::Complete);
 
     let mut jobs: Vec<Job> = Vec::new();
+    let mut cmd_history: Vec<String> = Vec::new();
 
     loop {
         reap_jobs(&mut jobs);
@@ -461,6 +462,8 @@ fn main() {
                 if input.is_empty() {
                     continue;
                 }
+
+                cmd_history.push(input.to_string());
 
                 let mut parts = parse_input(input);
 
@@ -1090,10 +1093,8 @@ fn main() {
                     // HISTORY
                     // ======================
                     "history" => {
-                        for i in 0..rl.history().len() {
-                            if let Ok(Some(entry)) = rl.history().get(i, SearchDirection::Reverse) {
-                                println!("{:>5}  {}", i + 1, entry.entry);
-                            }
+                        for (i, entry) in cmd_history.iter().enumerate() {
+                            println!("{:>5}  {}", i + 1, entry);
                         }
                     }
 
